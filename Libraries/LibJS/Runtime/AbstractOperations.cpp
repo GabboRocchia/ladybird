@@ -59,7 +59,19 @@ ThrowCompletionOr<Value> call_impl(VM& vm, Value function, Value this_value, Rea
         return vm.throw_completion<TypeError>(ErrorType::NotAFunction, function.to_string_without_side_effects());
 
     // 3. Return ? F.[[Call]](V, argumentsList).
-    return function.as_function().internal_call(this_value, arguments_list);
+    ExecutionContext* callee_context = nullptr;
+    auto& function_object = function.as_function();
+    size_t registers_and_constants_and_locals_count = 0;
+    size_t argument_count = arguments_list.size();
+    TRY(function_object.get_stack_frame_size(registers_and_constants_and_locals_count, argument_count));
+    ALLOCATE_EXECUTION_CONTEXT_ON_NATIVE_STACK(callee_context, registers_and_constants_and_locals_count, argument_count);
+
+    auto* argument_values = callee_context->arguments.data();
+    for (size_t i = 0; i < arguments_list.size(); ++i)
+        argument_values[i] = arguments_list[i];
+    callee_context->passed_argument_count = arguments_list.size();
+
+    return function_object.internal_call(*callee_context, this_value);
 }
 
 ThrowCompletionOr<Value> call_impl(VM&, FunctionObject& function, Value this_value, ReadonlySpan<Value> arguments_list)
@@ -70,7 +82,18 @@ ThrowCompletionOr<Value> call_impl(VM&, FunctionObject& function, Value this_val
     // Note: Called with a FunctionObject ref
 
     // 3. Return ? F.[[Call]](V, argumentsList).
-    return function.internal_call(this_value, arguments_list);
+    ExecutionContext* callee_context = nullptr;
+    size_t registers_and_constants_and_locals_count = 0;
+    size_t argument_count = arguments_list.size();
+    TRY(function.get_stack_frame_size(registers_and_constants_and_locals_count, argument_count));
+    ALLOCATE_EXECUTION_CONTEXT_ON_NATIVE_STACK(callee_context, registers_and_constants_and_locals_count, argument_count);
+
+    auto* argument_values = callee_context->arguments.data();
+    for (size_t i = 0; i < arguments_list.size(); ++i)
+        argument_values[i] = arguments_list[i];
+    callee_context->passed_argument_count = arguments_list.size();
+
+    return function.internal_call(*callee_context, this_value);
 }
 
 // 7.3.15 Construct ( F [ , argumentsList [ , newTarget ] ] ), https://tc39.es/ecma262/#sec-construct
@@ -175,29 +198,26 @@ ThrowCompletionOr<Realm*> get_function_realm(VM& vm, FunctionObject const& funct
     }
 
     // 2. If obj is a bound function exotic object, then
-    if (is<BoundFunction>(function)) {
-        auto& bound_function = static_cast<BoundFunction const&>(function);
+    if (auto const* bound_function = as_if<BoundFunction>(function)) {
+        // a. Let boundTargetFunction be obj.[[BoundTargetFunction]].
+        auto& bound_target_function = bound_function->bound_target_function();
 
-        // a. Let target be obj.[[BoundTargetFunction]].
-        auto& target = bound_function.bound_target_function();
-
-        // b. Return ? GetFunctionRealm(target).
-        return get_function_realm(vm, target);
+        // b. Return ? GetFunctionRealm(boundTargetFunction).
+        return get_function_realm(vm, bound_target_function);
     }
 
     // 3. If obj is a Proxy exotic object, then
-    if (is<ProxyObject>(function)) {
-        auto& proxy = static_cast<ProxyObject const&>(function);
-
-        // a. If obj.[[ProxyHandler]] is null, throw a TypeError exception.
-        if (proxy.is_revoked())
-            return vm.throw_completion<TypeError>(ErrorType::ProxyRevoked);
+    if (auto const* proxy = as_if<ProxyObject>(function)) {
+        // a. a. Perform ? ValidateNonRevokedProxy(obj).
+        TRY(proxy->validate_non_revoked_proxy());
 
         // b. Let proxyTarget be obj.[[ProxyTarget]].
-        auto& proxy_target = proxy.target();
+        auto& proxy_target = proxy->target();
 
-        // c. Return ? GetFunctionRealm(proxyTarget).
+        // c. Assert: proxyTarget is a function object.
         VERIFY(proxy_target.is_function());
+
+        // d. Return ? GetFunctionRealm(proxyTarget).
         return get_function_realm(vm, static_cast<FunctionObject const&>(proxy_target));
     }
 
@@ -426,7 +446,7 @@ GC::Ref<FunctionEnvironment> new_function_environment(ECMAScriptFunctionObject& 
     env->set_function_object(function);
 
     // 3. If F.[[ThisMode]] is lexical, set env.[[ThisBindingStatus]] to lexical.
-    if (function.this_mode() == ECMAScriptFunctionObject::ThisMode::Lexical)
+    if (function.this_mode() == ThisMode::Lexical)
         env->set_this_binding_status(FunctionEnvironment::ThisBindingStatus::Lexical);
     // 4. Else, set env.[[ThisBindingStatus]] to uninitialized.
     else
@@ -555,7 +575,7 @@ ThrowCompletionOr<Value> perform_eval(VM& vm, Value x, CallerMode strict_caller,
             in_method = this_function_environment_record.has_super_binding();
 
             // iv. If F.[[ConstructorKind]] is derived, set inDerivedConstructor to true.
-            if (function.constructor_kind() == ECMAScriptFunctionObject::ConstructorKind::Derived)
+            if (function.constructor_kind() == ConstructorKind::Derived)
                 in_derived_constructor = true;
 
             // v. Let classFieldInitializerName be F.[[ClassFieldInitializerName]].
@@ -583,7 +603,7 @@ ThrowCompletionOr<Value> perform_eval(VM& vm, Value x, CallerMode strict_caller,
         .in_class_field_initializer = in_class_field_initializer,
     };
 
-    Parser parser { Lexer { code_string.byte_string() }, Program::Type::Script, move(initial_state) };
+    Parser parser { Lexer { code_string.utf8_string_view() }, Program::Type::Script, move(initial_state) };
     auto program = parser.parse_program(strict_caller == CallerMode::Strict);
 
     //     b. If script is a List of errors, throw a SyntaxError exception.
@@ -646,8 +666,24 @@ ThrowCompletionOr<Value> perform_eval(VM& vm, Value x, CallerMode strict_caller,
     // 19. If runningContext is not already suspended, suspend runningContext.
     // NOTE: Done by the push on step 27.
 
+    // NOTE: Spec steps are rearranged in order to compute number of registers+constants+locals before construction of the execution context.
+
+    // 28. Let result be Completion(EvalDeclarationInstantiation(body, varEnv, lexEnv, privateEnv, strictEval)).
+    TRY(eval_declaration_instantiation(vm, program, variable_environment, lexical_environment, private_environment, strict_eval));
+
+    // 29. If result.[[Type]] is normal, then
+    //     a. Set result to the result of evaluating body.
+    auto executable_result = Bytecode::Generator::generate_from_ast_node(vm, program, {});
+    if (executable_result.is_error())
+        return vm.throw_completion<InternalError>(ErrorType::NotImplemented, TRY_OR_THROW_OOM(vm, executable_result.error().to_string()));
+    auto executable = executable_result.release_value();
+    executable->name = "eval"_fly_string;
+    if (Bytecode::g_dump_bytecode)
+        executable->dump();
+
     // 20. Let evalContext be a new ECMAScript code execution context.
-    auto eval_context = ExecutionContext::create();
+    ExecutionContext* eval_context = nullptr;
+    ALLOCATE_EXECUTION_CONTEXT_ON_NATIVE_STACK(eval_context, executable->number_of_registers + executable->constants.size() + executable->local_variable_names.size(), 0);
 
     // 21. Set evalContext's Function to null.
     // NOTE: This was done in the construction of eval_context.
@@ -680,28 +716,13 @@ ThrowCompletionOr<Value> perform_eval(VM& vm, Value x, CallerMode strict_caller,
         vm.pop_execution_context();
     };
 
-    // 28. Let result be Completion(EvalDeclarationInstantiation(body, varEnv, lexEnv, privateEnv, strictEval)).
-    TRY(eval_declaration_instantiation(vm, program, variable_environment, lexical_environment, private_environment, strict_eval));
-
     Optional<Value> eval_result;
 
-    // 29. If result.[[Type]] is normal, then
-    //     a. Set result to the result of evaluating body.
-    auto executable_result = Bytecode::Generator::generate_from_ast_node(vm, program, {});
-    if (executable_result.is_error())
-        return vm.throw_completion<InternalError>(ErrorType::NotImplemented, TRY_OR_THROW_OOM(vm, executable_result.error().to_string()));
-
-    auto executable = executable_result.release_value();
-    executable->name = "eval"_fly_string;
-    if (Bytecode::g_dump_bytecode)
-        executable->dump();
     auto result_or_error = vm.bytecode_interpreter().run_executable(*executable, {});
     if (result_or_error.value.is_error())
         return result_or_error.value.release_error();
 
-    auto& result = result_or_error.return_register_value;
-    if (!result.is_empty())
-        eval_result = result;
+    eval_result = result_or_error.return_register_value;
 
     // 30. If result.[[Type]] is normal and result.[[Value]] is empty, then
     //     a. Set result to NormalCompletion(undefined).
@@ -974,8 +995,12 @@ ThrowCompletionOr<void> eval_declaration_instantiation(VM& vm, Program const& pr
     for (auto& declaration : functions_to_initialize.in_reverse()) {
         // a. Let fn be the sole element of the BoundNames of f.
         // b. Let fo be InstantiateFunctionObject of f with arguments lexEnv and privateEnv.
-        auto function = ECMAScriptFunctionObject::create(realm, declaration.name(), declaration.source_text(), declaration.body(), declaration.parameters(), declaration.function_length(), declaration.local_variables_names(), lexical_environment, private_environment, declaration.kind(), declaration.is_strict_mode(),
-            declaration.parsing_insights());
+        auto function = ECMAScriptFunctionObject::create_from_function_node(
+            declaration,
+            declaration.name(),
+            realm,
+            lexical_environment,
+            private_environment);
 
         // c. If varEnv is a global Environment Record, then
         if (global_var_environment) {
@@ -1043,11 +1068,11 @@ Object* create_unmapped_arguments_object(VM& vm, ReadonlySpan<Value> arguments)
 
     // 2. Let obj be OrdinaryObjectCreate(%Object.prototype%, « [[ParameterMap]] »).
     // 3. Set obj.[[ParameterMap]] to undefined.
-    auto object = Object::create(realm, realm.intrinsics().object_prototype());
+    auto object = Object::create_with_premade_shape(realm.intrinsics().unmapped_arguments_object_shape());
     object->set_has_parameter_map();
 
     // 4. Perform ! DefinePropertyOrThrow(obj, "length", PropertyDescriptor { [[Value]]: 𝔽(len), [[Writable]]: true, [[Enumerable]]: false, [[Configurable]]: true }).
-    MUST(object->define_property_or_throw(vm.names.length, { .value = Value(length), .writable = true, .enumerable = false, .configurable = true }));
+    object->put_direct(realm.intrinsics().unmapped_arguments_object_length_offset(), Value(length));
 
     // 5. Let index be 0.
     // 6. Repeat, while index < len,
@@ -1056,25 +1081,24 @@ Object* create_unmapped_arguments_object(VM& vm, ReadonlySpan<Value> arguments)
         auto value = arguments[index];
 
         // b. Perform ! CreateDataPropertyOrThrow(obj, ! ToString(𝔽(index)), val).
-        MUST(object->create_data_property_or_throw(index, value));
+        object->indexed_properties().put(index, value);
 
         // c. Set index to index + 1.
     }
 
     // 7. Perform ! DefinePropertyOrThrow(obj, @@iterator, PropertyDescriptor { [[Value]]: %Array.prototype.values%, [[Writable]]: true, [[Enumerable]]: false, [[Configurable]]: true }).
     auto array_prototype_values = realm.intrinsics().array_prototype_values_function();
-    MUST(object->define_property_or_throw(vm.well_known_symbol_iterator(), { .value = array_prototype_values, .writable = true, .enumerable = false, .configurable = true }));
+    object->put_direct(realm.intrinsics().unmapped_arguments_object_well_known_symbol_iterator_offset(), array_prototype_values);
 
     // 8. Perform ! DefinePropertyOrThrow(obj, "callee", PropertyDescriptor { [[Get]]: %ThrowTypeError%, [[Set]]: %ThrowTypeError%, [[Enumerable]]: false, [[Configurable]]: false }).
-    auto throw_type_error = realm.intrinsics().throw_type_error_function();
-    MUST(object->define_property_or_throw(vm.names.callee, { .get = throw_type_error, .set = throw_type_error, .enumerable = false, .configurable = false }));
+    object->put_direct(realm.intrinsics().unmapped_arguments_object_callee_offset(), realm.intrinsics().throw_type_error_accessor());
 
     // 9. Return obj.
     return object;
 }
 
 // 10.4.4.7 CreateMappedArgumentsObject ( func, formals, argumentsList, env ), https://tc39.es/ecma262/#sec-createmappedargumentsobject
-Object* create_mapped_arguments_object(VM& vm, FunctionObject& function, Vector<FunctionParameter> const& formals, ReadonlySpan<Value> arguments, Environment& environment)
+Object* create_mapped_arguments_object(VM& vm, FunctionObject& function, NonnullRefPtr<FunctionParameters const> const& formals, ReadonlySpan<Value> arguments, Environment& environment)
 {
     auto& realm = *vm.current_realm();
 
@@ -1100,23 +1124,23 @@ Object* create_mapped_arguments_object(VM& vm, FunctionObject& function, Vector<
         auto value = arguments[index];
 
         // b. Perform ! CreateDataPropertyOrThrow(obj, ! ToString(𝔽(index)), val).
-        MUST(object->create_data_property_or_throw(index, value));
+        object->indexed_properties().put(index, value);
 
         // c. Set index to index + 1.
     }
 
     // 16. Perform ! DefinePropertyOrThrow(obj, "length", PropertyDescriptor { [[Value]]: 𝔽(len), [[Writable]]: true, [[Enumerable]]: false, [[Configurable]]: true }).
-    MUST(object->define_property_or_throw(vm.names.length, { .value = Value(length), .writable = true, .enumerable = false, .configurable = true }));
+    object->put_direct(realm.intrinsics().mapped_arguments_object_length_offset(), Value(length));
 
     // 17. Let mappedNames be a new empty List.
     HashTable<FlyString> mapped_names;
 
     // 18. Set index to numberOfParameters - 1.
     // 19. Repeat, while index ≥ 0,
-    VERIFY(formals.size() <= NumericLimits<i32>::max());
-    for (i32 index = static_cast<i32>(formals.size()) - 1; index >= 0; --index) {
+    VERIFY(formals->size() <= NumericLimits<i32>::max());
+    for (i32 index = static_cast<i32>(formals->size()) - 1; index >= 0; --index) {
         // a. Let name be parameterNames[index].
-        auto const& name = formals[index].binding.get<NonnullRefPtr<Identifier const>>()->string();
+        auto const& name = formals->parameters()[index].binding.get<NonnullRefPtr<Identifier const>>()->string();
 
         // b. If name is not an element of mappedNames, then
         if (mapped_names.contains(name))
@@ -1130,26 +1154,25 @@ Object* create_mapped_arguments_object(VM& vm, FunctionObject& function, Vector<
             // 1. Let g be MakeArgGetter(name, env).
             // 2. Let p be MakeArgSetter(name, env).
             // 3. Perform ! map.[[DefineOwnProperty]](! ToString(𝔽(index)), PropertyDescriptor { [[Set]]: p, [[Get]]: g, [[Enumerable]]: false, [[Configurable]]: true }).
-            object->parameter_map().define_native_accessor(
-                realm,
-                PropertyKey { index },
-                [&environment, name](VM& vm) -> ThrowCompletionOr<Value> {
-                    return MUST(environment.get_binding_value(vm, name, false));
-                },
-                [&environment, name](VM& vm) {
-                    MUST(environment.set_mutable_binding(vm, name, vm.argument(0), false));
-                    return js_undefined();
-                },
-                Attribute::Configurable);
+            object->parameter_map().indexed_properties().put(
+                index,
+                Accessor::create(vm,
+                    NativeFunction::create(realm, FlyString {}, [&environment, name](VM& vm) -> ThrowCompletionOr<Value> {
+                        return MUST(environment.get_binding_value(vm, name, false));
+                    }),
+                    NativeFunction::create(realm, FlyString {}, [&environment, name](VM& vm) {
+                        MUST(environment.set_mutable_binding(vm, name, vm.argument(0), false));
+                        return js_undefined();
+                    })));
         }
     }
 
     // 20. Perform ! DefinePropertyOrThrow(obj, @@iterator, PropertyDescriptor { [[Value]]: %Array.prototype.values%, [[Writable]]: true, [[Enumerable]]: false, [[Configurable]]: true }).
     auto array_prototype_values = realm.intrinsics().array_prototype_values_function();
-    MUST(object->define_property_or_throw(vm.well_known_symbol_iterator(), { .value = array_prototype_values, .writable = true, .enumerable = false, .configurable = true }));
+    object->put_direct(realm.intrinsics().mapped_arguments_object_well_known_symbol_iterator_offset(), array_prototype_values);
 
     // 21. Perform ! DefinePropertyOrThrow(obj, "callee", PropertyDescriptor { [[Value]]: func, [[Writable]]: true, [[Enumerable]]: false, [[Configurable]]: true }).
-    MUST(object->define_property_or_throw(vm.names.callee, { .value = &function, .writable = true, .enumerable = false, .configurable = true }));
+    object->put_direct(realm.intrinsics().mapped_arguments_object_callee_offset(), Value(&function));
 
     // 22. Return obj.
     return object;
@@ -1631,10 +1654,10 @@ Completion dispose_resources(VM& vm, DisposeCapability& dispose_capability, Comp
                 // 1. If completion is a throw completion, then
                 if (completion.type() == Completion::Type::Throw) {
                     // a. Set result to result.[[Value]].
-                    auto result_value = result.error().value().value();
+                    auto result_value = result.error().value();
 
                     // b. Let suppressed be completion.[[Value]].
-                    auto suppressed = completion.value().value();
+                    auto suppressed = completion.value();
 
                     // c. Let error be a newly created SuppressedError object.
                     auto error = SuppressedError::create(*vm.current_realm());

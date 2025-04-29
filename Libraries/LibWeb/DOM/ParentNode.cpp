@@ -244,6 +244,22 @@ WebIDL::ExceptionOr<void> ParentNode::replace_children(Vector<Variant<GC::Root<N
     return {};
 }
 
+// https://dom.spec.whatwg.org/#dom-parentnode-movebefore
+WebIDL::ExceptionOr<void> ParentNode::move_before(GC::Ref<Node> node, GC::Ptr<Node> child)
+{
+    // 1. Let referenceChild be child.
+    auto reference_child = child;
+
+    // 2. If referenceChild is node, then set referenceChild to node’s next sibling.
+    if (reference_child == node)
+        reference_child = node->next_sibling();
+
+    // 3. Move node into this before referenceChild.
+    TRY(node->move_node(*this, reference_child));
+
+    return {};
+}
+
 // https://dom.spec.whatwg.org/#dom-document-getelementsbyclassname
 GC::Ref<HTMLCollection> ParentNode::get_elements_by_class_name(StringView class_names)
 {
@@ -258,6 +274,31 @@ GC::Ref<HTMLCollection> ParentNode::get_elements_by_class_name(StringView class_
         }
         return !list_of_class_names.is_empty();
     });
+}
+
+GC::Ptr<Element> ParentNode::get_element_by_id(FlyString const& id) const
+{
+    if (is_connected()) {
+        // For connected document and shadow root we have a cache that allows fast lookup.
+        if (is_document()) {
+            auto const& document = static_cast<Document const&>(*this);
+            return document.element_by_id().get(id);
+        }
+        if (is_shadow_root()) {
+            auto const& shadow_root = static_cast<ShadowRoot const&>(*this);
+            return shadow_root.element_by_id().get(id);
+        }
+    }
+
+    GC::Ptr<Element> found_element;
+    const_cast<ParentNode&>(*this).for_each_in_inclusive_subtree_of_type<Element>([&](Element& element) {
+        if (element.id() == id) {
+            found_element = &element;
+            return TraversalDecision::Break;
+        }
+        return TraversalDecision::Continue;
+    });
+    return found_element;
 }
 
 }

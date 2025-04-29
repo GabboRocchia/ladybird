@@ -39,7 +39,6 @@
 - (NSMenuItem*)createFileMenu;
 - (NSMenuItem*)createEditMenu;
 - (NSMenuItem*)createViewMenu;
-- (NSMenuItem*)createSettingsMenu;
 - (NSMenuItem*)createHistoryMenu;
 - (NSMenuItem*)createInspectMenu;
 - (NSMenuItem*)createDebugMenu;
@@ -59,7 +58,6 @@
         [[NSApp mainMenu] addItem:[self createFileMenu]];
         [[NSApp mainMenu] addItem:[self createEditMenu]];
         [[NSApp mainMenu] addItem:[self createViewMenu]];
-        [[NSApp mainMenu] addItem:[self createSettingsMenu]];
         [[NSApp mainMenu] addItem:[self createHistoryMenu]];
         [[NSApp mainMenu] addItem:[self createInspectMenu]];
         [[NSApp mainMenu] addItem:[self createDebugMenu]];
@@ -577,19 +575,6 @@
     return menu;
 }
 
-- (NSMenuItem*)createSettingsMenu
-{
-    auto* menu = [[NSMenuItem alloc] init];
-    auto* submenu = [[NSMenu alloc] initWithTitle:@"Settings"];
-
-    [submenu addItem:[[NSMenuItem alloc] initWithTitle:@"Enable Autoplay"
-                                                action:@selector(toggleAutoplay:)
-                                         keyEquivalent:@""]];
-
-    [menu setSubmenu:submenu];
-    return menu;
-}
-
 - (NSMenuItem*)createHistoryMenu
 {
     auto* menu = [[NSMenuItem alloc] init];
@@ -623,7 +608,7 @@
 
     [submenu addItem:[[NSMenuItem alloc] initWithTitle:@"View Source"
                                                 action:@selector(viewSource:)
-                                         keyEquivalent:@""]];
+                                         keyEquivalent:@"u"]];
 
     self.toggle_devtools_menu_item = [[NSMenuItem alloc] initWithTitle:@"Enable DevTools"
                                                                 action:@selector(toggleDevToolsEnabled:)

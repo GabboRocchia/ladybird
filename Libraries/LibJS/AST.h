@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2024, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2020-2025, Andreas Kling <andreas@ladybird.org>
  * Copyright (c) 2020-2022, Linus Groh <linusg@serenityos.org>
  * Copyright (c) 2021-2022, David Tuin <davidot@serenityos.org>
  *
@@ -41,6 +41,7 @@ class FunctionDeclaration;
 class Identifier;
 class MemberExpression;
 class VariableDeclaration;
+class SharedFunctionInstanceData;
 
 template<class T, class... Args>
 static inline NonnullRefPtr<T>
@@ -94,11 +95,18 @@ public:
     virtual bool is_object_expression() const { return false; }
     virtual bool is_numeric_literal() const { return false; }
     virtual bool is_string_literal() const { return false; }
+    virtual bool is_boolean_literal() const { return false; }
+    virtual bool is_null_literal() const { return false; }
     virtual bool is_update_expression() const { return false; }
     virtual bool is_call_expression() const { return false; }
     virtual bool is_labelled_statement() const { return false; }
     virtual bool is_iteration_statement() const { return false; }
     virtual bool is_class_method() const { return false; }
+    virtual bool is_spread_expression() const { return false; }
+    virtual bool is_function_body() const { return false; }
+    virtual bool is_block_statement() const { return false; }
+    virtual bool is_primitive_literal() const { return false; }
+    virtual bool is_optional_chain() const { return false; }
 
 protected:
     explicit ASTNode(SourceRange);
@@ -570,6 +578,9 @@ public:
         : ScopeNode(move(source_range))
     {
     }
+
+private:
+    virtual bool is_block_statement() const override { return true; }
 };
 
 class FunctionBody final : public ScopeNode {
@@ -584,6 +595,8 @@ public:
     bool in_strict_mode() const { return m_in_strict_mode; }
 
 private:
+    virtual bool is_function_body() const override { return true; }
+
     bool m_in_strict_mode { false };
 };
 
@@ -646,7 +659,7 @@ struct BindingPattern : RefCounted<BindingPattern> {
 
     bool contains_expression() const;
 
-    Bytecode::CodeGenerationErrorOr<void> generate_bytecode(Bytecode::Generator&, Bytecode::Op::BindingInitializationMode initialization_mode, Bytecode::ScopedOperand const& object, bool create_variables) const;
+    Bytecode::CodeGenerationErrorOr<void> generate_bytecode(Bytecode::Generator&, Bytecode::Op::BindingInitializationMode initialization_mode, Bytecode::ScopedOperand const& object) const;
 
     Vector<BindingEntry> entries;
     Kind kind { Kind::Object };
@@ -662,13 +675,29 @@ public:
 
     FlyString const& string() const { return m_string; }
 
-    bool is_local() const { return m_local_variable_index.has_value(); }
-    size_t local_variable_index() const
+    struct Local {
+        enum Type {
+            Argument,
+            Variable,
+        };
+        Type type;
+        size_t index;
+
+        bool is_argument() const { return type == Argument; }
+        bool is_variable() const { return type == Variable; }
+
+        static Local variable(size_t index) { return { Variable, index }; }
+        static Local argument(size_t index) { return { Argument, index }; }
+    };
+
+    bool is_local() const { return m_local_index.has_value(); }
+    Local local_index() const
     {
-        VERIFY(m_local_variable_index.has_value());
-        return m_local_variable_index.value();
+        VERIFY(m_local_index.has_value());
+        return m_local_index.value();
     }
-    void set_local_variable_index(size_t index) { m_local_variable_index = index; }
+    void set_local_variable_index(size_t index) { m_local_index = Local::variable(index); }
+    void set_argument_index(size_t index) { m_local_index = Local::argument(index); }
 
     bool is_global() const { return m_is_global; }
     void set_is_global() { m_is_global = true; }
@@ -681,7 +710,7 @@ private:
 
     FlyString m_string;
 
-    Optional<size_t> m_local_variable_index;
+    Optional<Local> m_local_index;
     bool m_is_global { false };
 };
 
@@ -689,7 +718,44 @@ struct FunctionParameter {
     Variant<NonnullRefPtr<Identifier const>, NonnullRefPtr<BindingPattern const>> binding;
     RefPtr<Expression const> default_value;
     bool is_rest { false };
-    GC::Root<Bytecode::Executable> bytecode_executable {};
+};
+
+class FunctionParameters : public RefCounted<FunctionParameters> {
+public:
+    static NonnullRefPtr<FunctionParameters> create(Vector<FunctionParameter> parameters)
+    {
+        if (parameters.is_empty())
+            return empty();
+        return adopt_ref(*new FunctionParameters(move(parameters)));
+    }
+
+    static NonnullRefPtr<FunctionParameters> empty();
+
+    bool is_empty() const { return m_parameters.is_empty(); }
+    size_t size() const { return m_parameters.size(); }
+    Vector<FunctionParameter> const& parameters() const { return m_parameters; }
+
+    Optional<size_t> get_index_of_parameter_name(FlyString const& name) const
+    {
+        // Iterate backwards to return the last parameter with the same name
+        for (int i = m_parameters.size() - 1; i >= 0; i--) {
+            auto& parameter = m_parameters[i];
+            if (parameter.binding.has<NonnullRefPtr<Identifier const>>()) {
+                auto& identifier = parameter.binding.get<NonnullRefPtr<Identifier const>>();
+                if (identifier->string() == name)
+                    return i;
+            }
+        }
+        return {};
+    }
+
+private:
+    FunctionParameters(Vector<FunctionParameter> parameters)
+        : m_parameters(move(parameters))
+    {
+    }
+
+    Vector<FunctionParameter> m_parameters;
 };
 
 struct FunctionParsingInsights {
@@ -705,7 +771,8 @@ public:
     RefPtr<Identifier const> name_identifier() const { return m_name; }
     ByteString const& source_text() const { return m_source_text; }
     Statement const& body() const { return *m_body; }
-    Vector<FunctionParameter> const& parameters() const { return m_parameters; }
+    auto const& body_ptr() const { return m_body; }
+    auto const& parameters() const { return m_parameters; }
     i32 function_length() const { return m_function_length; }
     Vector<FlyString> const& local_variables_names() const { return m_local_variables_names; }
     bool is_strict_mode() const { return m_is_strict_mode; }
@@ -719,25 +786,13 @@ public:
     virtual bool has_name() const = 0;
     virtual Value instantiate_ordinary_function_expression(VM&, FlyString given_name) const = 0;
 
-    virtual ~FunctionNode() { }
+    RefPtr<SharedFunctionInstanceData> shared_data() const;
+    void set_shared_data(RefPtr<SharedFunctionInstanceData>) const;
+
+    virtual ~FunctionNode();
 
 protected:
-    FunctionNode(RefPtr<Identifier const> name, ByteString source_text, NonnullRefPtr<Statement const> body, Vector<FunctionParameter> parameters, i32 function_length, FunctionKind kind, bool is_strict_mode, FunctionParsingInsights parsing_insights, bool is_arrow_function, Vector<FlyString> local_variables_names)
-        : m_name(move(name))
-        , m_source_text(move(source_text))
-        , m_body(move(body))
-        , m_parameters(move(parameters))
-        , m_function_length(function_length)
-        , m_kind(kind)
-        , m_is_strict_mode(is_strict_mode)
-        , m_is_arrow_function(is_arrow_function)
-        , m_parsing_insights(parsing_insights)
-        , m_local_variables_names(move(local_variables_names))
-    {
-        if (m_is_arrow_function)
-            VERIFY(!parsing_insights.might_need_arguments_object);
-    }
-
+    FunctionNode(RefPtr<Identifier const> name, ByteString source_text, NonnullRefPtr<Statement const> body, NonnullRefPtr<FunctionParameters const> parameters, i32 function_length, FunctionKind kind, bool is_strict_mode, FunctionParsingInsights parsing_insights, bool is_arrow_function, Vector<FlyString> local_variables_names);
     void dump(int indent, ByteString const& class_name) const;
 
     RefPtr<Identifier const> m_name { nullptr };
@@ -745,7 +800,7 @@ protected:
 private:
     ByteString m_source_text;
     NonnullRefPtr<Statement const> m_body;
-    Vector<FunctionParameter> const m_parameters;
+    NonnullRefPtr<FunctionParameters const> m_parameters;
     i32 const m_function_length;
     FunctionKind m_kind;
     bool m_is_strict_mode : 1 { false };
@@ -753,6 +808,8 @@ private:
     FunctionParsingInsights m_parsing_insights;
 
     Vector<FlyString> m_local_variables_names;
+
+    mutable RefPtr<SharedFunctionInstanceData> m_shared_data;
 };
 
 class FunctionDeclaration final
@@ -761,7 +818,7 @@ class FunctionDeclaration final
 public:
     static bool must_have_name() { return true; }
 
-    FunctionDeclaration(SourceRange source_range, RefPtr<Identifier const> name, ByteString source_text, NonnullRefPtr<Statement const> body, Vector<FunctionParameter> parameters, i32 function_length, FunctionKind kind, bool is_strict_mode, FunctionParsingInsights insights, Vector<FlyString> local_variables_names)
+    FunctionDeclaration(SourceRange source_range, RefPtr<Identifier const> name, ByteString source_text, NonnullRefPtr<Statement const> body, NonnullRefPtr<FunctionParameters const> parameters, i32 function_length, FunctionKind kind, bool is_strict_mode, FunctionParsingInsights insights, Vector<FlyString> local_variables_names)
         : Declaration(move(source_range))
         , FunctionNode(move(name), move(source_text), move(body), move(parameters), function_length, kind, is_strict_mode, insights, false, move(local_variables_names))
     {
@@ -791,7 +848,7 @@ class FunctionExpression final
 public:
     static bool must_have_name() { return false; }
 
-    FunctionExpression(SourceRange source_range, RefPtr<Identifier const> name, ByteString source_text, NonnullRefPtr<Statement const> body, Vector<FunctionParameter> parameters, i32 function_length, FunctionKind kind, bool is_strict_mode, FunctionParsingInsights insights, Vector<FlyString> local_variables_names, bool is_arrow_function = false)
+    FunctionExpression(SourceRange source_range, RefPtr<Identifier const> name, ByteString source_text, NonnullRefPtr<Statement const> body, NonnullRefPtr<FunctionParameters const> parameters, i32 function_length, FunctionKind kind, bool is_strict_mode, FunctionParsingInsights insights, Vector<FlyString> local_variables_names, bool is_arrow_function = false)
         : Expression(move(source_range))
         , FunctionNode(move(name), move(source_text), move(body), move(parameters), function_length, kind, is_strict_mode, insights, is_arrow_function, move(local_variables_names))
     {
@@ -1173,6 +1230,9 @@ protected:
         : Expression(move(source_range))
     {
     }
+
+private:
+    virtual bool is_primitive_literal() const override { return true; }
 };
 
 class BooleanLiteral final : public PrimitiveLiteral {
@@ -1189,6 +1249,8 @@ public:
     virtual Value value() const override { return Value(m_value); }
 
 private:
+    virtual bool is_boolean_literal() const override { return true; }
+
     bool m_value { false };
 };
 
@@ -1256,6 +1318,9 @@ public:
     virtual Bytecode::CodeGenerationErrorOr<Optional<Bytecode::ScopedOperand>> generate_bytecode(Bytecode::Generator&, Optional<Bytecode::ScopedOperand> preferred_dst = {}) const override;
 
     virtual Value value() const override { return js_null(); }
+
+private:
+    virtual bool is_null_literal() const override { return true; }
 };
 
 class RegExpLiteral final : public Expression {
@@ -1365,11 +1430,10 @@ private:
 
 class ClassField final : public ClassElement {
 public:
-    ClassField(SourceRange source_range, NonnullRefPtr<Expression const> key, RefPtr<Expression const> init, bool contains_direct_call_to_eval, bool is_static)
+    ClassField(SourceRange source_range, NonnullRefPtr<Expression const> key, RefPtr<Expression const> init, bool is_static)
         : ClassElement(move(source_range), is_static)
         , m_key(move(key))
         , m_initializer(move(init))
-        , m_contains_direct_call_to_eval(contains_direct_call_to_eval)
     {
     }
 
@@ -1386,15 +1450,13 @@ public:
 private:
     NonnullRefPtr<Expression const> m_key;
     RefPtr<Expression const> m_initializer;
-    bool m_contains_direct_call_to_eval { false };
 };
 
 class StaticInitializer final : public ClassElement {
 public:
-    StaticInitializer(SourceRange source_range, NonnullRefPtr<FunctionBody> function_body, bool contains_direct_call_to_eval)
+    StaticInitializer(SourceRange source_range, NonnullRefPtr<FunctionBody> function_body)
         : ClassElement(move(source_range), true)
         , m_function_body(move(function_body))
-        , m_contains_direct_call_to_eval(contains_direct_call_to_eval)
     {
     }
 
@@ -1405,7 +1467,6 @@ public:
 
 private:
     NonnullRefPtr<FunctionBody> m_function_body;
-    bool m_contains_direct_call_to_eval { false };
 };
 
 class SuperExpression final : public Expression {
@@ -1514,6 +1575,8 @@ public:
     virtual Bytecode::CodeGenerationErrorOr<Optional<Bytecode::ScopedOperand>> generate_bytecode(Bytecode::Generator&, Optional<Bytecode::ScopedOperand> preferred_dst = {}) const override;
 
 private:
+    virtual bool is_spread_expression() const override { return true; }
+
     NonnullRefPtr<Expression const> m_target;
 };
 
@@ -1976,6 +2039,8 @@ public:
     Vector<Reference> const& references() const { return m_references; }
 
 private:
+    virtual bool is_optional_chain() const override { return true; }
+
     NonnullRefPtr<Expression const> m_base;
     Vector<Reference> m_references;
 };
@@ -2040,7 +2105,7 @@ private:
 
 class CatchClause final : public ASTNode {
 public:
-    CatchClause(SourceRange source_range, FlyString parameter, NonnullRefPtr<BlockStatement const> body)
+    CatchClause(SourceRange source_range, NonnullRefPtr<Identifier const> parameter, NonnullRefPtr<BlockStatement const> body)
         : ASTNode(move(source_range))
         , m_parameter(move(parameter))
         , m_body(move(body))
@@ -2054,13 +2119,20 @@ public:
     {
     }
 
+    CatchClause(SourceRange source_range, NonnullRefPtr<BlockStatement const> body)
+        : ASTNode(move(source_range))
+        , m_parameter(Empty {})
+        , m_body(move(body))
+    {
+    }
+
     auto& parameter() const { return m_parameter; }
     BlockStatement const& body() const { return m_body; }
 
     virtual void dump(int indent) const override;
 
 private:
-    Variant<FlyString, NonnullRefPtr<BindingPattern const>> m_parameter;
+    Variant<NonnullRefPtr<Identifier const>, NonnullRefPtr<BindingPattern const>, Empty> m_parameter;
     NonnullRefPtr<BlockStatement const> m_body;
 };
 
@@ -2243,6 +2315,15 @@ template<>
 inline bool ASTNode::fast_is<ImportCall>() const { return is_import_call(); }
 
 template<>
+inline bool ASTNode::fast_is<NumericLiteral>() const { return is_numeric_literal(); }
+
+template<>
+inline bool ASTNode::fast_is<BooleanLiteral>() const { return is_boolean_literal(); }
+
+template<>
+inline bool ASTNode::fast_is<NullLiteral>() const { return is_null_literal(); }
+
+template<>
 inline bool ASTNode::fast_is<StringLiteral>() const { return is_string_literal(); }
 
 template<>
@@ -2259,5 +2340,20 @@ inline bool ASTNode::fast_is<IterationStatement>() const { return is_iteration_s
 
 template<>
 inline bool ASTNode::fast_is<ClassMethod>() const { return is_class_method(); }
+
+template<>
+inline bool ASTNode::fast_is<SpreadExpression>() const { return is_spread_expression(); }
+
+template<>
+inline bool ASTNode::fast_is<FunctionBody>() const { return is_function_body(); }
+
+template<>
+inline bool ASTNode::fast_is<BlockStatement>() const { return is_block_statement(); }
+
+template<>
+inline bool ASTNode::fast_is<PrimitiveLiteral>() const { return is_primitive_literal(); }
+
+template<>
+inline bool ASTNode::fast_is<OptionalChain>() const { return is_optional_chain(); }
 
 }

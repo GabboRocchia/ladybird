@@ -84,14 +84,14 @@ static ErrorOr<void, TestError> run_program(InterpreterT& interpreter, ScriptOrM
         });
 
     if (result.is_error()) {
-        auto error_value = *result.throw_completion().value();
+        auto error_value = result.throw_completion().value();
         TestError error;
         error.phase = NegativePhase::Runtime;
         if (error_value.is_object()) {
             auto& object = error_value.as_object();
 
             auto name = object.get_without_side_effects("name"_fly_string);
-            if (!name.is_empty() && !name.is_accessor()) {
+            if (!name.is_undefined() && !name.is_accessor()) {
                 error.type = name.to_string_without_side_effects();
             } else {
                 auto constructor = object.get_without_side_effects("constructor"_fly_string);
@@ -103,7 +103,7 @@ static ErrorOr<void, TestError> run_program(InterpreterT& interpreter, ScriptOrM
             }
 
             auto message = object.get_without_side_effects("message"_fly_string);
-            if (!message.is_empty() && !message.is_accessor())
+            if (!message.is_undefined() && !message.is_accessor())
                 error.details = message.to_string_without_side_effects();
         }
         if (error.type.is_empty())
@@ -210,7 +210,7 @@ static ErrorOr<void, TestError> run_test(StringView source, StringView filepath,
         return {};
     }
 
-    auto vm = MUST(JS::VM::create());
+    auto vm = JS::VM::create();
     vm->set_dynamic_imports_allowed(true);
 
     GC::Ptr<JS::Realm> realm;
@@ -373,8 +373,10 @@ static ErrorOr<TestMetadata, String> extract_metadata(StringView source)
                     metadata.harness_files.append(async_include);
                     metadata.is_async = true;
                 } else if (flag == "CanBlockIsFalse"sv) {
-                    if (JS::agent_can_suspend())
-                        metadata.skip_test = SkipTest::Yes;
+                    // NOTE: This should only be skipped if AgentCanSuspend is set to true. This is currently always the case.
+                    //       Ideally we would check that, but we don't have the VM by this stage. So for now, we rely on that
+                    //       assumption.
+                    metadata.skip_test = SkipTest::Yes;
                 }
             }
         } else if (line.starts_with("includes:"sv)) {

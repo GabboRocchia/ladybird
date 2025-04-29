@@ -105,21 +105,25 @@ public:
         return scope_pusher;
     }
 
-    static ScopePusher catch_scope(Parser& parser, RefPtr<BindingPattern const> const& pattern, FlyString const& parameter)
+    static ScopePusher catch_scope(Parser& parser)
     {
-        ScopePusher scope_pusher(parser, nullptr, ScopeLevel::NotTopLevel, ScopeType::Catch);
+        return ScopePusher(parser, nullptr, ScopeLevel::NotTopLevel, ScopeType::Catch);
+    }
+
+    void add_catch_parameter(RefPtr<BindingPattern const> const& pattern, RefPtr<Identifier const> const& parameter)
+    {
         if (pattern) {
             // NOTE: Nothing in the callback throws an exception.
             MUST(pattern->for_each_bound_identifier([&](auto const& identifier) {
-                scope_pusher.m_forbidden_var_names.set(identifier.string());
-                scope_pusher.m_bound_names.set(identifier.string());
+                m_forbidden_var_names.set(identifier.string());
+                m_bound_names.set(identifier.string());
+                m_catch_parameter_names.set(identifier.string());
             }));
-        } else if (!parameter.is_empty()) {
-            scope_pusher.m_var_names.set(parameter);
-            scope_pusher.m_bound_names.set(parameter);
+        } else if (parameter) {
+            m_var_names.set(parameter->string());
+            m_bound_names.set(parameter->string());
+            m_catch_parameter_names.set(parameter->string());
         }
-
-        return scope_pusher;
     }
 
     static ScopePusher static_init_block_scope(Parser& parser, ScopeNode& node)
@@ -219,13 +223,13 @@ public:
     ScopePusher const* last_function_scope() const
     {
         for (auto scope_ptr = this; scope_ptr; scope_ptr = scope_ptr->m_parent_scope) {
-            if (scope_ptr->m_function_parameters.has_value())
+            if (scope_ptr->m_function_parameters)
                 return scope_ptr;
         }
         return nullptr;
     }
 
-    Vector<FunctionParameter> const& function_parameters() const
+    auto const& function_parameters() const
     {
         return *m_function_parameters;
     }
@@ -239,21 +243,20 @@ public:
     }
 
     bool contains_direct_call_to_eval() const { return m_contains_direct_call_to_eval; }
-    bool contains_access_to_arguments_object() const { return m_contains_access_to_arguments_object; }
     void set_contains_direct_call_to_eval()
     {
         m_contains_direct_call_to_eval = true;
         m_screwed_by_eval_in_scope_chain = true;
     }
-    void set_contains_access_to_arguments_object() { m_contains_access_to_arguments_object = true; }
+    void set_contains_access_to_arguments_object_in_non_strict_mode() { m_contains_access_to_arguments_object_in_non_strict_mode = true; }
     void set_scope_node(ScopeNode* node) { m_node = node; }
-    void set_function_parameters(Vector<FunctionParameter> const& parameters)
+    void set_function_parameters(NonnullRefPtr<FunctionParameters const> parameters)
     {
-        m_function_parameters = parameters;
-        for (auto& parameter : parameters) {
+        m_function_parameters = move(parameters);
+        for (auto& parameter : m_function_parameters->parameters()) {
             parameter.binding.visit(
                 [&](Identifier const& identifier) {
-                    register_identifier(identifier);
+                    register_identifier(fixme_launder_const_through_pointer_cast(identifier));
                     m_function_parameters_candidates_for_local_variables.set(identifier.string());
                     m_forbidden_lexical_names.set(identifier.string());
                 },
@@ -270,8 +273,8 @@ public:
     {
         VERIFY(is_top_level() || m_parent_scope);
 
-        if (m_parent_scope && !m_function_parameters.has_value()) {
-            m_parent_scope->m_contains_access_to_arguments_object |= m_contains_access_to_arguments_object;
+        if (m_parent_scope && !m_function_parameters) {
+            m_parent_scope->m_contains_access_to_arguments_object_in_non_strict_mode |= m_contains_access_to_arguments_object_in_non_strict_mode;
             m_parent_scope->m_contains_direct_call_to_eval |= m_contains_direct_call_to_eval;
             m_parent_scope->m_contains_await_expression |= m_contains_await_expression;
         }
@@ -289,12 +292,6 @@ public:
             auto const& identifier_group_name = it.key;
             auto& identifier_group = it.value;
 
-            if (m_parser.m_state.in_catch_parameter_context) {
-                // NOTE: The parser currently cannot determine if an identifier captured by a function belongs to the environment created by a catch parameter.
-                //       As a result, any identifiers used inside the catch parameter are not considered as candidates for optimization in local or global variable access.
-                continue;
-            }
-
             bool scope_has_declaration = false;
             if (is_top_level() && m_var_names.contains(identifier_group_name))
                 scope_has_declaration = true;
@@ -304,13 +301,16 @@ public:
             if (m_type == ScopeType::Function && !m_is_arrow_function && identifier_group_name == "arguments"sv)
                 scope_has_declaration = true;
 
+            if (m_type == ScopeType::Catch && m_catch_parameter_names.contains(identifier_group_name))
+                scope_has_declaration = true;
+
             bool hoistable_function_declaration = false;
             for (auto const& function_declaration : m_functions_to_hoist) {
                 if (function_declaration->name() == identifier_group_name)
                     hoistable_function_declaration = true;
             }
 
-            if ((m_type == ScopeType::ClassDeclaration || m_type == ScopeType::Catch) && m_bound_names.contains(identifier_group_name)) {
+            if (m_type == ScopeType::ClassDeclaration && m_bound_names.contains(identifier_group_name)) {
                 // NOTE: Currently, the parser cannot recognize that assigning a named function expression creates a scope with a binding for the function name.
                 //       As a result, function names are not considered as candidates for optimization in global variable access.
                 continue;
@@ -321,14 +321,15 @@ public:
                 identifier_group.might_be_variable_in_lexical_scope_in_named_function_assignment = true;
             }
 
-            if (m_type == ScopeType::ClassDeclaration || m_type == ScopeType::Catch) {
-                // NOTE: Class declaration and catch scopes do not have own ScopeNode hence can't contain declaration of any variable
+            if (m_type == ScopeType::ClassDeclaration) {
+                // NOTE: Class declaration doesn't not have own ScopeNode hence can't contain declaration of any variable
                 scope_has_declaration = false;
             }
 
+            bool is_function_parameter = false;
             if (m_type == ScopeType::Function) {
-                if (!m_contains_access_to_arguments_object && m_function_parameters_candidates_for_local_variables.contains(identifier_group_name)) {
-                    scope_has_declaration = true;
+                if (!m_contains_access_to_arguments_object_in_non_strict_mode && m_function_parameters_candidates_for_local_variables.contains(identifier_group_name)) {
+                    is_function_parameter = true;
                 } else if (m_forbidden_lexical_names.contains(identifier_group_name)) {
                     // NOTE: If an identifier is used as a function parameter that cannot be optimized locally or globally, it is simply ignored.
                     continue;
@@ -346,7 +347,7 @@ public:
                     for (auto& identifier : identifier_group.identifiers)
                         identifier->set_is_global();
                 }
-            } else if (scope_has_declaration) {
+            } else if (scope_has_declaration || is_function_parameter) {
                 if (hoistable_function_declaration)
                     continue;
 
@@ -368,12 +369,18 @@ public:
                         local_scope = m_top_level_scope;
                     }
 
-                    auto local_variable_index = local_scope->m_node->add_local_variable(identifier_group_name);
-                    for (auto& identifier : identifier_group.identifiers)
-                        identifier->set_local_variable_index(local_variable_index);
+                    if (is_function_parameter) {
+                        auto argument_index = local_scope->m_function_parameters->get_index_of_parameter_name(identifier_group_name);
+                        for (auto& identifier : identifier_group.identifiers)
+                            identifier->set_argument_index(argument_index.value());
+                    } else {
+                        auto local_variable_index = local_scope->m_node->add_local_variable(identifier_group_name);
+                        for (auto& identifier : identifier_group.identifiers)
+                            identifier->set_local_variable_index(local_variable_index);
+                    }
                 }
             } else {
-                if (m_function_parameters.has_value() || m_type == ScopeType::ClassField || m_type == ScopeType::ClassStaticInit) {
+                if (m_function_parameters || m_type == ScopeType::ClassField || m_type == ScopeType::ClassStaticInit) {
                     // NOTE: Class fields and class static initialization sections implicitly create functions
                     identifier_group.captured_by_nested_function = true;
                 }
@@ -494,6 +501,7 @@ private:
     HashTable<FlyString> m_lexical_names;
     HashTable<FlyString> m_var_names;
     HashTable<FlyString> m_function_names;
+    HashTable<FlyString> m_catch_parameter_names;
 
     HashTable<FlyString> m_forbidden_lexical_names;
     HashTable<FlyString> m_forbidden_var_names;
@@ -512,9 +520,9 @@ private:
     };
     HashMap<FlyString, IdentifierGroup> m_identifier_groups;
 
-    Optional<Vector<FunctionParameter>> m_function_parameters;
+    RefPtr<FunctionParameters const> m_function_parameters;
 
-    bool m_contains_access_to_arguments_object { false };
+    bool m_contains_access_to_arguments_object_in_non_strict_mode { false };
     bool m_contains_direct_call_to_eval { false };
     bool m_contains_await_expression { false };
     bool m_screwed_by_eval_in_scope_chain { false };
@@ -973,9 +981,9 @@ static bool is_strict_reserved_word(StringView str)
     });
 }
 
-static bool is_simple_parameter_list(Vector<FunctionParameter> const& parameters)
+static bool is_simple_parameter_list(FunctionParameters const& parameters)
 {
-    return all_of(parameters, [](FunctionParameter const& parameter) {
+    return all_of(parameters.parameters(), [](FunctionParameter const& parameter) {
         return !parameter.is_rest && parameter.default_value.is_null() && parameter.binding.has<NonnullRefPtr<Identifier const>>();
     });
 }
@@ -1027,7 +1035,7 @@ RefPtr<FunctionExpression const> Parser::try_parse_arrow_function_expression(boo
         }
     }
 
-    Vector<FunctionParameter> parameters;
+    auto parameters = FunctionParameters::empty();
     i32 function_length = -1;
     FunctionParsingInsights parsing_insights;
     parsing_insights.might_need_arguments_object = false;
@@ -1044,7 +1052,8 @@ RefPtr<FunctionExpression const> Parser::try_parse_arrow_function_expression(boo
             auto previous_syntax_errors = m_state.errors.size();
             TemporaryChange in_async_context(m_state.await_expression_is_valid, is_async || m_state.await_expression_is_valid);
 
-            parameters = parse_formal_parameters(function_length, FunctionNodeParseOptions::IsArrowFunction | (is_async ? FunctionNodeParseOptions::IsAsyncFunction : 0));
+            auto const_correct_parameters = parse_formal_parameters(function_length, FunctionNodeParseOptions::IsArrowFunction | (is_async ? FunctionNodeParseOptions::IsAsyncFunction : 0));
+            parameters = fixme_launder_const_through_pointer_cast(const_correct_parameters);
             if (m_state.errors.size() > previous_syntax_errors && m_state.errors[previous_syntax_errors].message.bytes_as_string_view().starts_with("Unexpected token"sv))
                 return nullptr;
             if (!match(TokenType::ParenClose))
@@ -1060,8 +1069,9 @@ RefPtr<FunctionExpression const> Parser::try_parse_arrow_function_expression(boo
             if (is_async && token.value() == "await"sv)
                 syntax_error("'await' is a reserved identifier in async functions"_string);
             auto identifier = create_ast_node<Identifier const>({ m_source_code, rule_start.position(), position() }, token.fly_string_value());
-            parameters.append({ identifier, {} });
+            parameters = FunctionParameters::create(Vector<FunctionParameter> { FunctionParameter { identifier, {} } });
         }
+
         // If there's a newline between the closing paren and arrow it's not a valid arrow function,
         // ASI should kick in instead (it'll then fail with "Unexpected token Arrow")
         if (m_state.current_token.trivia_contains_line_terminator())
@@ -1071,7 +1081,7 @@ RefPtr<FunctionExpression const> Parser::try_parse_arrow_function_expression(boo
         consume();
 
         if (function_length == -1)
-            function_length = parameters.size();
+            function_length = parameters->size();
 
         auto old_labels_in_scope = move(m_state.labels_in_scope);
         ScopeGuard guard([&]() {
@@ -1089,6 +1099,7 @@ RefPtr<FunctionExpression const> Parser::try_parse_arrow_function_expression(boo
             consume(TokenType::CurlyClose);
             return body;
         }
+
         if (match_expression()) {
             // Parse a function body which returns a single expression
 
@@ -1099,7 +1110,7 @@ RefPtr<FunctionExpression const> Parser::try_parse_arrow_function_expression(boo
             auto return_block = create_ast_node<FunctionBody>({ m_source_code, rule_start.position(), position() });
             VERIFY(m_state.current_scope_pusher->type() == ScopePusher::ScopeType::Function);
             m_state.current_scope_pusher->set_scope_node(return_block);
-            m_state.current_scope_pusher->set_function_parameters(parameters);
+            m_state.current_scope_pusher->set_function_parameters(*parameters);
             auto return_expression = parse_expression(2);
             return_block->append<ReturnStatement const>({ m_source_code, rule_start.position(), position() }, move(return_expression));
             if (m_state.strict_mode)
@@ -1122,7 +1133,7 @@ RefPtr<FunctionExpression const> Parser::try_parse_arrow_function_expression(boo
     auto body = function_body_result.release_nonnull();
 
     if (body->in_strict_mode()) {
-        for (auto& parameter : parameters) {
+        for (auto& parameter : parameters->parameters()) {
             parameter.binding.visit(
                 [&](Identifier const& identifier) {
                     check_identifier_name_for_assignment_validity(identifier.string(), true);
@@ -1533,11 +1544,15 @@ NonnullRefPtr<ClassExpression const> Parser::parse_class_expression(bool expect_
                 TemporaryChange class_static_init_block_rollback(m_state.in_class_static_init_block, true);
                 TemporaryChange super_property_access_rollback(m_state.allow_super_property_lookup, true);
 
-                ScopePusher static_init_scope = ScopePusher::static_init_block_scope(*this, *static_init_block);
-                parse_statement_list(static_init_block);
+                {
+                    ScopePusher static_init_scope = ScopePusher::static_init_block_scope(*this, *static_init_block);
+                    static_init_scope.set_function_parameters(FunctionParameters::empty());
+
+                    parse_statement_list(static_init_block);
+                }
 
                 consume(TokenType::CurlyClose);
-                elements.append(create_ast_node<StaticInitializer>({ m_source_code, static_start.position(), position() }, move(static_init_block), static_init_scope.contains_direct_call_to_eval()));
+                elements.append(create_ast_node<StaticInitializer>({ m_source_code, static_start.position(), position() }, move(static_init_block)));
                 continue;
             } else {
                 expected("property key");
@@ -1559,7 +1574,7 @@ NonnullRefPtr<ClassExpression const> Parser::parse_class_expression(bool expect_
         }
 
         if (match(TokenType::ParenOpen)) {
-            u8 parse_options = FunctionNodeParseOptions::AllowSuperPropertyLookup;
+            u16 parse_options = FunctionNodeParseOptions::AllowSuperPropertyLookup;
             if (!super_class.is_null() && !is_static && is_constructor)
                 parse_options |= FunctionNodeParseOptions::AllowSuperConstructorCall;
             if (method_kind == ClassMethod::Kind::Getter)
@@ -1570,6 +1585,8 @@ NonnullRefPtr<ClassExpression const> Parser::parse_class_expression(bool expect_
                 parse_options |= FunctionNodeParseOptions::IsGeneratorFunction;
             if (is_async)
                 parse_options |= FunctionNodeParseOptions::IsAsyncFunction;
+            if (is_constructor)
+                parse_options |= FunctionNodeParseOptions::IsConstructor;
             auto function = parse_function_node<FunctionExpression>(parse_options, function_start);
             if (is_constructor) {
                 constructor = move(function);
@@ -1589,7 +1606,6 @@ NonnullRefPtr<ClassExpression const> Parser::parse_class_expression(bool expect_
                 syntax_error("Class cannot have field named 'constructor'"_string);
 
             RefPtr<Expression const> initializer;
-            bool contains_direct_call_to_eval = false;
 
             if (match(TokenType::Equals)) {
                 consume();
@@ -1600,10 +1616,9 @@ NonnullRefPtr<ClassExpression const> Parser::parse_class_expression(bool expect_
                 auto class_scope_node = create_ast_node<BlockStatement>({ m_source_code, rule_start.position(), position() });
                 auto class_field_scope = ScopePusher::class_field_scope(*this, *class_scope_node);
                 initializer = parse_expression(2);
-                contains_direct_call_to_eval = class_field_scope.contains_direct_call_to_eval();
             }
 
-            elements.append(create_ast_node<ClassField>({ m_source_code, rule_start.position(), position() }, property_key.release_nonnull(), move(initializer), contains_direct_call_to_eval, is_static));
+            elements.append(create_ast_node<ClassField>({ m_source_code, rule_start.position(), position() }, property_key.release_nonnull(), move(initializer), is_static));
             consume_or_insert_semicolon();
         }
     }
@@ -1631,15 +1646,19 @@ NonnullRefPtr<ClassExpression const> Parser::parse_class_expression(bool expect_
             constructor_body->append(create_ast_node<ReturnStatement>({ m_source_code, rule_start.position(), position() }, move(super_call)));
 
             FunctionParsingInsights parsing_insights;
+            parsing_insights.uses_this_from_environment = true;
+            parsing_insights.uses_this = true;
             constructor = create_ast_node<FunctionExpression>(
                 { m_source_code, rule_start.position(), position() }, class_name, "",
-                move(constructor_body), Vector { FunctionParameter { move(argument_name), nullptr, true } }, 0, FunctionKind::Normal,
+                move(constructor_body), FunctionParameters::create(Vector { FunctionParameter { move(argument_name), nullptr, true } }), 0, FunctionKind::Normal,
                 /* is_strict_mode */ true, parsing_insights, /* local_variables_names */ Vector<FlyString> {});
         } else {
             FunctionParsingInsights parsing_insights;
+            parsing_insights.uses_this_from_environment = true;
+            parsing_insights.uses_this = true;
             constructor = create_ast_node<FunctionExpression>(
                 { m_source_code, rule_start.position(), position() }, class_name, "",
-                move(constructor_body), Vector<FunctionParameter> {}, 0, FunctionKind::Normal,
+                move(constructor_body), FunctionParameters::empty(), 0, FunctionKind::Normal,
                 /* is_strict_mode */ true, parsing_insights, /* local_variables_names */ Vector<FlyString> {});
         }
     }
@@ -1690,7 +1709,7 @@ Parser::PrimaryExpressionParseResult Parser::parse_primary_expression()
         auto expression = parse_expression(0);
         consume(TokenType::ParenClose);
         if (is<NewExpression>(*expression)) {
-            auto& new_expression = static_cast<NewExpression&>(*static_cast<NonnullRefPtr<Expression>>(expression));
+            auto& new_expression = static_cast<NewExpression&>(*fixme_launder_const_through_pointer_cast(expression));
             new_expression.set_inside_parens();
         } else if (is<FunctionExpression>(*expression)) {
             auto& function = static_cast<FunctionExpression const&>(*expression);
@@ -2069,7 +2088,7 @@ NonnullRefPtr<ObjectExpression const> Parser::parse_object_expression()
                 invalid_object_literal_property_range = expression->source_range();
         } else if (match(TokenType::ParenOpen)) {
             VERIFY(property_key);
-            u8 parse_options = FunctionNodeParseOptions::AllowSuperPropertyLookup;
+            u16 parse_options = FunctionNodeParseOptions::AllowSuperPropertyLookup;
             if (property_type == ObjectProperty::Type::Getter)
                 parse_options |= FunctionNodeParseOptions::IsGetterFunction;
             if (property_type == ObjectProperty::Type::Setter)
@@ -2288,9 +2307,8 @@ NonnullRefPtr<Expression const> Parser::parse_expression(int min_precedence, Ass
             }
         }
 
-        if (has_not_been_declared_as_variable) {
-            if (identifier_instance->string() == "arguments"sv)
-                m_state.current_scope_pusher->set_contains_access_to_arguments_object();
+        if (has_not_been_declared_as_variable && !m_state.strict_mode && identifier_instance->string() == "arguments"sv) {
+            m_state.current_scope_pusher->set_contains_access_to_arguments_object_in_non_strict_mode();
         }
     }
 
@@ -2790,7 +2808,7 @@ void Parser::parse_statement_list(ScopeNode& output_node, AllowLabelledFunction 
 }
 
 // FunctionBody, https://tc39.es/ecma262/#prod-FunctionBody
-NonnullRefPtr<FunctionBody const> Parser::parse_function_body(Vector<FunctionParameter> const& parameters, FunctionKind function_kind, FunctionParsingInsights& parsing_insights)
+NonnullRefPtr<FunctionBody const> Parser::parse_function_body(NonnullRefPtr<FunctionParameters const> parameters, FunctionKind function_kind, FunctionParsingInsights& parsing_insights)
 {
     auto rule_start = push_start();
     auto function_body = create_ast_node<FunctionBody>({ m_source_code, rule_start.position(), position() });
@@ -2804,7 +2822,7 @@ NonnullRefPtr<FunctionBody const> Parser::parse_function_body(Vector<FunctionPar
     if (has_use_strict) {
         m_state.strict_mode = true;
         function_body->set_strict_mode();
-        if (!is_simple_parameter_list(parameters))
+        if (!is_simple_parameter_list(*parameters))
             syntax_error("Illegal 'use strict' directive in function with non-simple parameter list"_string);
     } else if (previous_strict_mode) {
         function_body->set_strict_mode();
@@ -2820,7 +2838,7 @@ NonnullRefPtr<FunctionBody const> Parser::parse_function_body(Vector<FunctionPar
     // If the function contains 'use strict' we need to check the parameters (again).
     if (function_body->in_strict_mode() || function_kind != FunctionKind::Normal) {
         Vector<StringView> parameter_names;
-        for (auto& parameter : parameters) {
+        for (auto& parameter : parameters->parameters()) {
             parameter.binding.visit(
                 [&](Identifier const& identifier) {
                     auto const& parameter_name = identifier.string();
@@ -2952,7 +2970,7 @@ NonnullRefPtr<FunctionNodeType> Parser::parse_function_node(u16 parse_options, O
     TemporaryChange async_change(m_state.await_expression_is_valid, function_kind == FunctionKind::Async || function_kind == FunctionKind::AsyncGenerator);
 
     i32 function_length = -1;
-    Vector<FunctionParameter> parameters;
+    RefPtr<FunctionParameters const> parameters;
     FunctionParsingInsights parsing_insights;
     auto body = [&] {
         ScopePusher function_scope = ScopePusher::function_scope(*this, name);
@@ -2962,7 +2980,7 @@ NonnullRefPtr<FunctionNodeType> Parser::parse_function_node(u16 parse_options, O
         consume(TokenType::ParenClose);
 
         if (function_length == -1)
-            function_length = parameters.size();
+            function_length = parameters->size();
 
         TemporaryChange function_context_rollback(m_state.in_function_context, true);
 
@@ -2973,8 +2991,7 @@ NonnullRefPtr<FunctionNodeType> Parser::parse_function_node(u16 parse_options, O
 
         consume(TokenType::CurlyOpen);
 
-        auto body = parse_function_body(parameters, function_kind, parsing_insights);
-        return body;
+        return parse_function_body(*parameters, function_kind, parsing_insights);
     }();
 
     auto local_variables_names = body->local_variables_names();
@@ -2989,14 +3006,18 @@ NonnullRefPtr<FunctionNodeType> Parser::parse_function_node(u16 parse_options, O
     auto function_end_offset = position().offset - m_state.current_token.trivia().length();
     auto source_text = ByteString { m_state.lexer.source().substring_view(function_start_offset, function_end_offset - function_start_offset) };
     parsing_insights.might_need_arguments_object = m_state.function_might_need_arguments_object;
+    if (parse_options & FunctionNodeParseOptions::IsConstructor) {
+        parsing_insights.uses_this = true;
+        parsing_insights.uses_this_from_environment = true;
+    }
     return create_ast_node<FunctionNodeType>(
         { m_source_code, rule_start.position(), position() },
-        name, move(source_text), move(body), move(parameters), function_length,
+        name, move(source_text), move(body), parameters.release_nonnull(), function_length,
         function_kind, has_strict_directive, parsing_insights,
         move(local_variables_names));
 }
 
-Vector<FunctionParameter> Parser::parse_formal_parameters(int& function_length, u16 parse_options)
+NonnullRefPtr<FunctionParameters const> Parser::parse_formal_parameters(int& function_length, u16 parse_options)
 {
     auto rule_start = push_start();
     bool has_default_parameter = false;
@@ -3090,7 +3111,7 @@ Vector<FunctionParameter> Parser::parse_formal_parameters(int& function_length, 
         expected(Token::name(TokenType::ParenClose));
 
     parameters.shrink_to_fit();
-    return parameters;
+    return FunctionParameters::create(move(parameters));
 }
 
 static AK::Array<FlyString, 36> s_reserved_words = { "break"_fly_string, "case"_fly_string, "catch"_fly_string, "class"_fly_string, "const"_fly_string, "continue"_fly_string, "debugger"_fly_string, "default"_fly_string, "delete"_fly_string, "do"_fly_string, "else"_fly_string, "enum"_fly_string, "export"_fly_string, "extends"_fly_string, "false"_fly_string, "finally"_fly_string, "for"_fly_string, "function"_fly_string, "if"_fly_string, "import"_fly_string, "in"_fly_string, "instanceof"_fly_string, "new"_fly_string, "null"_fly_string, "return"_fly_string, "super"_fly_string, "switch"_fly_string, "this"_fly_string, "throw"_fly_string, "true"_fly_string, "try"_fly_string, "typeof"_fly_string, "var"_fly_string, "void"_fly_string, "while"_fly_string, "with"_fly_string };
@@ -3763,24 +3784,26 @@ NonnullRefPtr<CatchClause const> Parser::parse_catch_clause()
     auto rule_start = push_start();
     consume(TokenType::Catch);
 
-    FlyString parameter;
+    ScopePusher catch_scope = ScopePusher::catch_scope(*this);
+
+    RefPtr<Identifier const> parameter;
     RefPtr<BindingPattern const> pattern_parameter;
     auto should_expect_parameter = false;
     if (match(TokenType::ParenOpen)) {
-        TemporaryChange catch_parameter_context_change { m_state.in_catch_parameter_context, true };
         should_expect_parameter = true;
         consume();
         if (match_identifier_name()
             && (!match(TokenType::Yield) || !m_state.in_generator_function_context)
             && (!match(TokenType::Async) || !m_state.await_expression_is_valid)
-            && (!match(TokenType::Await) || !m_state.in_class_static_init_block))
-            parameter = consume().fly_string_value();
-        else
+            && (!match(TokenType::Await) || !m_state.in_class_static_init_block)) {
+            parameter = parse_identifier();
+        } else {
             pattern_parameter = parse_binding_pattern(AllowDuplicates::No, AllowMemberExpressions::No);
+        }
         consume(TokenType::ParenClose);
     }
 
-    if (should_expect_parameter && parameter.is_empty() && !pattern_parameter)
+    if (should_expect_parameter && !parameter && !pattern_parameter)
         expected("an identifier or a binding pattern");
 
     HashTable<FlyString> bound_names;
@@ -3794,12 +3817,13 @@ NonnullRefPtr<CatchClause const> Parser::parse_catch_clause()
             }));
     }
 
-    if (!parameter.is_empty()) {
-        check_identifier_name_for_assignment_validity(parameter);
-        bound_names.set(parameter);
+    if (parameter) {
+        check_identifier_name_for_assignment_validity(parameter->string());
+        bound_names.set(parameter->string());
     }
 
-    ScopePusher catch_scope = ScopePusher::catch_scope(*this, pattern_parameter, parameter);
+    catch_scope.add_catch_parameter(pattern_parameter, parameter);
+
     auto body = parse_block_statement();
 
     // NOTE: Nothing in the callback throws an exception.
@@ -3815,9 +3839,15 @@ NonnullRefPtr<CatchClause const> Parser::parse_catch_clause()
             move(body));
     }
 
+    if (parameter) {
+        return create_ast_node<CatchClause>(
+            { m_source_code, rule_start.position(), position() },
+            parameter.release_nonnull(),
+            move(body));
+    }
+
     return create_ast_node<CatchClause>(
         { m_source_code, rule_start.position(), position() },
-        move(parameter),
         move(body));
 }
 
@@ -5169,7 +5199,7 @@ NonnullRefPtr<Identifier const> Parser::create_identifier_and_register_in_curren
     return id;
 }
 
-Parser Parser::parse_function_body_from_string(ByteString const& body_string, u16 parse_options, Vector<FunctionParameter> const& parameters, FunctionKind kind, FunctionParsingInsights& parsing_insights)
+Parser Parser::parse_function_body_from_string(ByteString const& body_string, u16 parse_options, NonnullRefPtr<FunctionParameters const> parameters, FunctionKind kind, FunctionParsingInsights& parsing_insights)
 {
     RefPtr<FunctionBody const> function_body;
 
@@ -5182,7 +5212,7 @@ Parser Parser::parse_function_body_from_string(ByteString const& body_string, u1
             body_parser.m_state.await_expression_is_valid = true;
         if ((parse_options & FunctionNodeParseOptions::IsGeneratorFunction) != 0)
             body_parser.m_state.in_generator_function_context = true;
-        function_body = body_parser.parse_function_body(parameters, kind, parsing_insights);
+        function_body = body_parser.parse_function_body(move(parameters), kind, parsing_insights);
     }
 
     return body_parser;

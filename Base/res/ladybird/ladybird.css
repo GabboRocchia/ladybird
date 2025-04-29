@@ -32,7 +32,7 @@
     --slate-blue-50: #97bce6;
     --slate-blue-60: #86add9;
     --slate-blue-80: #77a1d1;
-    --slate-blue-100: #8a64e5;
+    --slate-blue-100: #6d98cc;
     --slate-blue-300: #5c8ecc;
     --slate-blue-500: #5484bf;
     --slate-blue-900: #4872a3;
@@ -43,6 +43,9 @@
     :root {
         --text-color: #2f3640;
         --toggle-background-color: #cccccc;
+        --secondary-button-color: #dddddd;
+        --secondary-button-hover: #e1e1e1;
+        --secondary-button-active: #e9e9e9;
     }
 }
 
@@ -50,26 +53,35 @@
     :root {
         --text-color: #e0e0e0;
         --toggle-background-color: #555555;
+        --secondary-button-color: #555555;
+        --secondary-button-hover: #505050;
+        --secondary-button-active: #444444;
     }
 }
 
 * {
     color-scheme: light dark;
     font-family: sans-serif;
+
+    margin: 0;
+    padding: 0;
 }
 
 body {
     color: var(--text-color);
 }
 
+.hidden {
+    display: none;
+    opacity: 0;
+}
+
 /**
  * Generic form controls.
  */
 
-button.primary-button {
-    color: white;
-    background-color: var(--violet-100);
-
+button.primary-button,
+button.secondary-button {
     font-size: 14px;
 
     border: none;
@@ -79,14 +91,43 @@ button.primary-button {
     cursor: pointer;
 }
 
+button.primary-button:hover,
+button.secondary-button:hover {
+    filter: unset;
+}
+
+button.primary-button:active,
+button.secondary-button:active {
+    outline: none;
+}
+
+button.primary-button {
+    color: white;
+    background-color: var(--violet-100);
+}
+
 button.primary-button:hover {
     background-color: var(--violet-500);
-    filter: unset;
 }
 
 button.primary-button:active {
     background-color: var(--violet-900);
-    outline: none;
+}
+
+button.primary-button:disabled {
+    background-color: var(--violet-60);
+}
+
+button.secondary-button {
+    background-color: var(--secondary-button-color);
+}
+
+button.secondary-button:hover {
+    background-color: var(--secondary-button-hover);
+}
+
+button.secondary-button:active {
+    background-color: var(--secondary-button-active);
 }
 
 input[type="search"],
@@ -109,67 +150,27 @@ select:focus {
     outline: none;
 }
 
-/**
- * Create a toggle switch as a checkbox alternative:
- *
- * <div class="toggle-container">
- *     <label for="your-toggle">Toggle Label</label>
- *     <label class="toggle">
- *         <input id="your-toggle" type="checkbox" checked />
- *         <span class="toggle-button"></span>
- *     </label>
- * </div>
- */
-
-.toggle-container {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-}
-
-.toggle-container .toggle {
+input[type="checkbox"][switch] {
     width: 50px;
     height: 24px;
 
-    display: inline-block;
-    position: relative;
-}
-
-.toggle-container .toggle input {
-    display: none;
-}
-
-.toggle-container .toggle-button {
     background-color: var(--toggle-background-color);
-    border-radius: 24px;
-
-    position: absolute;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    left: 0;
-
     cursor: pointer;
+
+    outline: none;
 }
 
-.toggle-container .toggle-button:before {
-    background-color: white;
-    border-radius: 50%;
-
-    content: "";
-
-    width: 18px;
-    height: 18px;
-
-    position: absolute;
-    bottom: 3px;
-    left: 3px;
-}
-
-.toggle-container input:checked + .toggle-button {
+input[type="checkbox"][switch]:checked {
     background-color: var(--violet-100);
 }
 
-.toggle-container input:checked + .toggle-button:before {
-    transform: translateX(26px);
+input[type="checkbox"][switch]::before {
+    background-color: white;
+    border: 0.6em solid white;
+
+    left: 3px;
+}
+
+input[type="checkbox"][switch]:checked::before {
+    left: calc(100% - 1.3em);
 }

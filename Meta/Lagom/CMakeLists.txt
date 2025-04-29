@@ -1,5 +1,9 @@
 cmake_minimum_required (VERSION 3.21)
 
+if (APPLE AND NOT CMAKE_OSX_SYSROOT)
+    set(CMAKE_OSX_SYSROOT macosx)
+endif()
+
 project(
     Lagom
     VERSION 0.0.0
@@ -135,12 +139,6 @@ add_library(JSClangPlugin INTERFACE)
 add_library(GenericClangPlugin INTERFACE)
 
 if (CMAKE_CXX_COMPILER_ID MATCHES "Clang$")
-    add_cxx_compile_options(-Wno-overloaded-virtual)
-    # FIXME: Re-enable this check when the warning stops triggering, or document why we can't stop it from triggering.
-    # For now, there is a lot of unused private fields in LibWeb that trigger this that could be removed.
-    # See issue #14137 for details
-    add_cxx_compile_options(-Wno-unused-private-field)
-
     if (ENABLE_FUZZERS_LIBFUZZER)
         add_cxx_compile_options(-fsanitize=fuzzer)
         set(LINKER_FLAGS "${LINKER_FLAGS} -fsanitize=fuzzer")
@@ -323,13 +321,9 @@ add_lagom_library_install_rules(GenericClangPlugin)
 add_lagom_library_install_rules(JSClangPlugin)
 
 # Create mostly empty targets for system libraries we don't need to build for Lagom
-add_library(LibCrypt INTERFACE)
-if (NOT APPLE AND NOT ANDROID AND NOT EMSCRIPTEN AND NOT ${CMAKE_SYSTEM_NAME} MATCHES "OpenBSD" AND NOT HAIKU AND NOT WIN32)
-    target_link_libraries(LibCrypt INTERFACE crypt) # LibCore::Account uses crypt() but it's not in libcrypt on macOS
-endif()
 add_library(NoCoverage INTERFACE)
 # "install" these special targets to placate CMake
-install(TARGETS LibCrypt NoCoverage EXPORT LagomTargets)
+install(TARGETS NoCoverage EXPORT LagomTargets)
 
 # AK
 add_serenity_subdirectory(AK)
@@ -433,6 +427,8 @@ compile_ipc(${SERENITY_PROJECT_ROOT}/Services/WebContent/WebContentServer.ipc Se
 compile_ipc(${SERENITY_PROJECT_ROOT}/Services/WebContent/WebContentClient.ipc Services/WebContent/WebContentClientEndpoint.h)
 compile_ipc(${SERENITY_PROJECT_ROOT}/Services/WebContent/WebDriverClient.ipc Services/WebContent/WebDriverClientEndpoint.h)
 compile_ipc(${SERENITY_PROJECT_ROOT}/Services/WebContent/WebDriverServer.ipc Services/WebContent/WebDriverServerEndpoint.h)
+compile_ipc(${SERENITY_PROJECT_ROOT}/Services/WebContent/WebUIClient.ipc Services/WebContent/WebUIClientEndpoint.h)
+compile_ipc(${SERENITY_PROJECT_ROOT}/Services/WebContent/WebUIServer.ipc Services/WebContent/WebUIServerEndpoint.h)
 
 foreach(lib IN LISTS lagom_standard_libraries)
     add_serenity_subdirectory("Libraries/Lib${lib}")
@@ -477,7 +473,7 @@ if (ASSERT_FAIL_HAS_INT OR EMSCRIPTEN)
     target_compile_definitions(test262-runner PRIVATE ASSERT_FAIL_HAS_INT)
 endif()
 
-lagom_utility(wasm SOURCES ../../Utilities/wasm.cpp LIBS LibFileSystem LibWasm LibLine LibMain LibJS)
+lagom_utility(wasm SOURCES ../../Utilities/wasm.cpp LIBS LibFileSystem LibWasm LibLine LibMain)
 lagom_utility(xml SOURCES ../../Utilities/xml.cpp LIBS LibFileSystem LibMain LibXML LibURL)
 
 include(CTest)

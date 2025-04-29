@@ -123,8 +123,8 @@ MediaCapabilities::MediaCapabilities(JS::Realm& realm)
 
 void MediaCapabilities::initialize(JS::Realm& realm)
 {
-    Base::initialize(realm);
     WEB_SET_PROTOTYPE_FOR_INTERFACE(MediaCapabilities);
+    Base::initialize(realm);
 }
 
 // https://w3c.github.io/media-capabilities/#queue-a-media-capabilities-task
@@ -238,7 +238,7 @@ GC::Ref<JS::Object> MediaCapabilitiesDecodingInfo::to_object(JS::Realm& realm)
 
     MUST(object->create_data_property("supported"_fly_string, JS::BooleanObject::create(realm, supported)));
     MUST(object->create_data_property("smooth"_fly_string, JS::BooleanObject::create(realm, smooth)));
-    MUST(object->create_data_property("powerEfficent"_fly_string, JS::BooleanObject::create(realm, power_efficient)));
+    MUST(object->create_data_property("powerEfficient"_fly_string, JS::BooleanObject::create(realm, power_efficient)));
 
     return object;
 }

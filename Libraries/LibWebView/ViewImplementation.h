@@ -28,11 +28,12 @@
 #include <LibWebView/DOMNodeProperties.h>
 #include <LibWebView/Forward.h>
 #include <LibWebView/PageInfo.h>
+#include <LibWebView/Settings.h>
 #include <LibWebView/WebContentClient.h>
 
 namespace WebView {
 
-class ViewImplementation {
+class ViewImplementation : public SettingsObserver {
 public:
     virtual ~ViewImplementation();
 
@@ -78,12 +79,6 @@ public:
     void set_preferred_color_scheme(Web::CSS::PreferredColorScheme);
     void set_preferred_contrast(Web::CSS::PreferredContrast);
     void set_preferred_motion(Web::CSS::PreferredMotion);
-
-    void set_preferred_languages(ReadonlySpan<String>);
-
-    void set_enable_do_not_track(bool);
-
-    void set_enable_autoplay(bool);
 
     ByteString selected_text();
     Optional<String> selected_text_with_whitespace_collapsed();
@@ -206,14 +201,13 @@ public:
     Function<void(JsonObject)> on_received_accessibility_tree;
     Function<void(Web::UniqueNodeID)> on_received_hovered_node_id;
     Function<void(Mutation)> on_dom_mutation_received;
-    Function<void(Optional<Web::UniqueNodeID> const& node_id)> on_finshed_editing_dom_node;
+    Function<void(Optional<Web::UniqueNodeID> const& node_id)> on_finished_editing_dom_node;
     Function<void(String)> on_received_dom_node_html;
     Function<void(Vector<Web::CSS::StyleSheetIdentifier>)> on_received_style_sheet_list;
     Function<void(Web::CSS::StyleSheetIdentifier const&, URL::URL const&, String const&)> on_received_style_sheet_source;
     Function<void(JsonValue)> on_received_js_console_result;
     Function<void(i32 message_id)> on_console_message_available;
-    Function<void(i32 start_index, Vector<String> const& message_types, Vector<String> const& messages)> on_received_styled_console_messages;
-    Function<void(i32 start_index, Vector<ConsoleOutput>)> on_received_unstyled_console_messages;
+    Function<void(i32 start_index, Vector<ConsoleOutput>)> on_received_console_messages;
     Function<void(i32 count_waiting)> on_resource_status_change;
     Function<void()> on_restore_window;
     Function<void(Gfx::IntPoint)> on_reposition_window;
@@ -266,10 +260,14 @@ protected:
     };
     void handle_web_content_process_crash(LoadErrorPage = LoadErrorPage::Yes);
 
+    virtual void languages_changed() override;
+    virtual void autoplay_settings_changed() override;
+    virtual void do_not_track_changed() override;
+
     struct SharedBitmap {
         i32 id { -1 };
         Web::DevicePixelSize last_painted_size;
-        RefPtr<Gfx::Bitmap> bitmap;
+        RefPtr<Gfx::Bitmap const> bitmap;
     };
 
     struct ClientState {
@@ -291,7 +289,7 @@ protected:
 
     RefPtr<Core::Timer> m_backing_store_shrink_timer;
 
-    RefPtr<Gfx::Bitmap> m_backup_bitmap;
+    RefPtr<Gfx::Bitmap const> m_backup_bitmap;
     Web::DevicePixelSize m_backup_bitmap_size;
 
     size_t m_crash_count = 0;

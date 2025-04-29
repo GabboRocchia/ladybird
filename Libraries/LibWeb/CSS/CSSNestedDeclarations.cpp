@@ -27,8 +27,8 @@ CSSNestedDeclarations::CSSNestedDeclarations(JS::Realm& realm, CSSStylePropertie
 
 void CSSNestedDeclarations::initialize(JS::Realm& realm)
 {
-    Base::initialize(realm);
     WEB_SET_PROTOTYPE_FOR_INTERFACE(CSSNestedDeclarations);
+    Base::initialize(realm);
 }
 
 void CSSNestedDeclarations::visit_edges(Cell::Visitor& visitor)
@@ -38,7 +38,7 @@ void CSSNestedDeclarations::visit_edges(Cell::Visitor& visitor)
     visitor.visit(m_parent_style_rule);
 }
 
-CSSStyleDeclaration* CSSNestedDeclarations::style()
+GC::Ref<CSSStyleProperties> CSSNestedDeclarations::style()
 {
     return m_declaration;
 }

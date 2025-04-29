@@ -23,6 +23,7 @@ AudioParam
 AudioScheduledSourceNode
 AudioTrack
 AudioTrackList
+BarProp
 BaseAudioContext
 BeforeUnloadEvent
 BigInt
@@ -37,6 +38,7 @@ ByteLengthQueuingStrategy
 CDATASection
 CSSAnimation
 CSSConditionRule
+CSSFontFaceDescriptors
 CSSFontFaceRule
 CSSGroupingRule
 CSSImportRule
@@ -67,6 +69,7 @@ ClipboardEvent
 ClipboardItem
 CloseEvent
 CloseWatcher
+CommandEvent
 Comment
 CompositionEvent
 CompressionStream

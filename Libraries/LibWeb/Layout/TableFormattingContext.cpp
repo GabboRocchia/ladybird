@@ -38,15 +38,18 @@ CSSPixels TableFormattingContext::run_caption_layout(CSS::CaptionSide phase)
         if (!child->display().is_table_caption() || child->computed_values().caption_side() != phase) {
             continue;
         }
+        auto const& child_box = as<Box>(*child);
         // The caption boxes are principal block-level boxes that retain their own content, padding, margin, and border areas,
         // and are rendered as normal block boxes inside the table wrapper box, as described in https://www.w3.org/TR/CSS22/tables.html#model
-        auto caption_context = make<BlockFormattingContext>(m_state, m_layout_mode, *as<BlockContainer>(child), this);
-        caption_context->run(*m_available_space);
-        VERIFY(child->is_box());
-        auto const& child_box = static_cast<Box const&>(*child);
-        // FIXME: Since caption only has inline children, BlockFormattingContext doesn't resolve the vertical metrics.
-        //        We need to do it manually here.
-        caption_context->resolve_vertical_box_model_metrics(child_box, m_available_space->width.to_px_or_zero());
+        if (auto caption_context = create_independent_formatting_context_if_needed(m_state, m_layout_mode, child_box)) {
+            caption_context->run(*m_available_space);
+            // FIXME: If caption only has inline children, BlockFormattingContext doesn't resolve the vertical metrics.
+            //        We need to do it manually here.
+            if (caption_context->type() == FormattingContext::Type::Block) {
+                static_cast<BlockFormattingContext&>(*caption_context).resolve_vertical_box_model_metrics(child_box, m_available_space->width.to_px_or_zero());
+            }
+        }
+
         auto const& caption_state = m_state.get(child_box);
         if (phase == CSS::CaptionSide::Top) {
             m_state.get_mutable(table_box()).set_content_y(caption_state.content_height() + caption_state.margin_box_bottom());
@@ -295,15 +298,15 @@ void TableFormattingContext::compute_intrinsic_percentage(size_t max_cell_span)
                 //    that the cell spans. If this gives a negative result, change it to 0%.
                 // 3. Multiply by the ratio of the column’s non-spanning max-content width to the sum of the non-spanning max-content widths of all
                 //    columns spanned by the cell that have an intrinsic percentage width of the column based on cells of span up to N-1 equal to 0%.
-                CSSPixels ajusted_cell_contribution;
+                CSSPixels adjusted_cell_contribution;
                 if (width_sum_of_columns_with_zero_intrinsic_percentage != 0) {
-                    ajusted_cell_contribution = cell_contribution.scaled(rows_or_columns[rc_index].max_size / static_cast<double>(width_sum_of_columns_with_zero_intrinsic_percentage));
+                    adjusted_cell_contribution = cell_contribution.scaled(rows_or_columns[rc_index].max_size / static_cast<double>(width_sum_of_columns_with_zero_intrinsic_percentage));
                 } else {
                     // However, if this ratio is undefined because the denominator is zero, instead use the 1 divided by the number of columns
                     // spanned by the cell that have an intrinsic percentage width of the column based on cells of span up to N-1 equal to zero.
-                    ajusted_cell_contribution = cell_contribution * 1 / number_of_columns_with_zero_intrinsic_percentage;
+                    adjusted_cell_contribution = cell_contribution * 1 / number_of_columns_with_zero_intrinsic_percentage;
                 }
-                intrinsic_percentage_contribution_by_index[rc_index] = max(static_cast<double>(ajusted_cell_contribution), intrinsic_percentage_contribution_by_index[rc_index]);
+                intrinsic_percentage_contribution_by_index[rc_index] = max(static_cast<double>(adjusted_cell_contribution), intrinsic_percentage_contribution_by_index[rc_index]);
             }
         }
         for (size_t rc_index = 0; rc_index < rows_or_columns.size(); ++rc_index) {

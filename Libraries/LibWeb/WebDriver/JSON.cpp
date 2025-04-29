@@ -121,7 +121,7 @@ static ErrorOr<ResultType, WebDriver::Error> clone_an_object(HTML::BrowsingConte
         auto source_property_value = value.get(name);
         if (source_property_value.is_error()) {
             error = WebDriver::Error::from_code(ErrorCode::JavascriptError, "Script returned an error"sv);
-            return JS::normal_completion({});
+            return JS::normal_completion(JS::js_undefined());
         }
 
         // 3. Let cloned property result be the result of calling the clone algorithm with session, source property
@@ -143,7 +143,7 @@ static ErrorOr<ResultType, WebDriver::Error> clone_an_object(HTML::BrowsingConte
         // 5. Otherwise, return cloned property result.
         else {
             error = cloned_property_result.release_error();
-            return JS::normal_completion({});
+            return JS::normal_completion(JS::js_undefined());
         }
 
         return {};
@@ -253,7 +253,7 @@ static Response internal_json_clone(HTML::BrowsingContext const& browsing_contex
     // -> has an own property named "toJSON" that is a Function
     if (auto to_json = object.get_without_side_effects(vm.names.toJSON); to_json.is_function()) {
         // Return success with the value returned by Function.[[Call]](toJSON) with value as the this value.
-        auto to_json_result = TRY_OR_JS_ERROR(to_json.as_function().internal_call(value, GC::RootVector<JS::Value> { vm.heap() }));
+        auto to_json_result = TRY_OR_JS_ERROR(JS::call(vm, to_json.as_function(), value));
         if (!to_json_result.is_string())
             return WebDriver::Error::from_code(ErrorCode::JavascriptError, "toJSON did not return a String"sv);
 

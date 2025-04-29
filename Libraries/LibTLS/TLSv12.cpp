@@ -58,6 +58,9 @@ ErrorOr<Bytes> TLSv12::read_some(Bytes bytes)
     if (ret <= 0) {
         switch (SSL_get_error(m_ssl, ret)) {
         case SSL_ERROR_ZERO_RETURN:
+            if (auto const pending = TRY(pending_bytes()); pending > 0)
+                return Error::from_errno(EAGAIN);
+            close();
             return Bytes { bytes.data(), 0 };
         case SSL_ERROR_WANT_READ:
         case SSL_ERROR_WANT_WRITE:
@@ -147,10 +150,9 @@ ErrorOr<void> TLSv12::set_close_on_exec(bool enabled)
     return m_socket->set_close_on_exec(enabled);
 }
 
-TLSv12::TLSv12(NonnullOwnPtr<Core::TCPSocket> socket, SSL_CTX* ssl_ctx, SSL* ssl, BIO* bio)
+TLSv12::TLSv12(NonnullOwnPtr<Core::TCPSocket> socket, SSL_CTX* ssl_ctx, SSL* ssl)
     : m_ssl_ctx(ssl_ctx)
     , m_ssl(ssl)
-    , m_bio(bio)
     , m_socket(move(socket))
 {
     m_socket->on_ready_to_read = [this] {
@@ -244,7 +246,7 @@ ErrorOr<NonnullOwnPtr<TLSv12>> TLSv12::connect_internal(NonnullOwnPtr<Core::TCPS
     free_ssl.disarm();
     free_ssl_ctx.disarm();
 
-    return adopt_own(*new TLSv12(move(socket), ssl_ctx, ssl, bio));
+    return adopt_own(*new TLSv12(move(socket), ssl_ctx, ssl));
 }
 
 }

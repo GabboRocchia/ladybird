@@ -21,6 +21,7 @@
 namespace Gfx {
 
 struct PaintingSurface::Impl {
+    RefPtr<SkiaBackendContext> context;
     IntSize size;
     sk_sp<SkSurface> surface;
     RefPtr<Bitmap> bitmap;
@@ -36,12 +37,14 @@ NonnullRefPtr<PaintingSurface> PaintingSurface::create_with_size(RefPtr<SkiaBack
         auto bitmap = Bitmap::create(color_type, alpha_type, size).value();
         auto surface = SkSurfaces::WrapPixels(image_info, bitmap->begin(), bitmap->pitch());
         VERIFY(surface);
-        return adopt_ref(*new PaintingSurface(make<Impl>(size, surface, bitmap)));
+        return adopt_ref(*new PaintingSurface(make<Impl>(context, size, surface, bitmap)));
     }
 
+    context->lock();
     auto surface = SkSurfaces::RenderTarget(context->sk_context(), skgpu::Budgeted::kNo, image_info);
     VERIFY(surface);
-    return adopt_ref(*new PaintingSurface(make<Impl>(size, surface, nullptr)));
+    context->unlock();
+    return adopt_ref(*new PaintingSurface(make<Impl>(context, size, surface, nullptr)));
 }
 
 NonnullRefPtr<PaintingSurface> PaintingSurface::wrap_bitmap(Bitmap& bitmap)
@@ -51,12 +54,17 @@ NonnullRefPtr<PaintingSurface> PaintingSurface::wrap_bitmap(Bitmap& bitmap)
     auto size = bitmap.size();
     auto image_info = SkImageInfo::Make(bitmap.width(), bitmap.height(), color_type, alpha_type, SkColorSpace::MakeSRGB());
     auto surface = SkSurfaces::WrapPixels(image_info, bitmap.begin(), bitmap.pitch());
-    return adopt_ref(*new PaintingSurface(make<Impl>(size, surface, bitmap)));
+    return adopt_ref(*new PaintingSurface(make<Impl>(RefPtr<SkiaBackendContext> {}, size, surface, bitmap)));
 }
 
 #ifdef AK_OS_MACOS
 NonnullRefPtr<PaintingSurface> PaintingSurface::wrap_iosurface(Core::IOSurfaceHandle const& iosurface_handle, RefPtr<SkiaBackendContext> context, Origin origin)
 {
+    context->lock();
+    ScopeGuard unlock_guard([&context] {
+        context->unlock();
+    });
+
     auto metal_texture = context->metal_context().create_texture_from_iosurface(iosurface_handle);
     IntSize const size { metal_texture->width(), metal_texture->height() };
     auto image_info = SkImageInfo::Make(size.width(), size.height(), kBGRA_8888_SkColorType, kPremul_SkAlphaType, SkColorSpace::MakeSRGB());
@@ -75,7 +83,7 @@ NonnullRefPtr<PaintingSurface> PaintingSurface::wrap_iosurface(Core::IOSurfaceHa
         VERIFY_NOT_REACHED();
     }
     auto surface = SkSurfaces::WrapBackendRenderTarget(context->sk_context(), backend_render_target, sk_origin, kBGRA_8888_SkColorType, nullptr, nullptr);
-    return adopt_ref(*new PaintingSurface(make<Impl>(size, surface, nullptr)));
+    return adopt_ref(*new PaintingSurface(make<Impl>(context, size, surface, nullptr)));
 }
 #endif
 
@@ -84,7 +92,12 @@ PaintingSurface::PaintingSurface(NonnullOwnPtr<Impl>&& impl)
 {
 }
 
-PaintingSurface::~PaintingSurface() = default;
+PaintingSurface::~PaintingSurface()
+{
+    lock_context();
+    m_impl->surface = nullptr;
+    unlock_context();
+}
 
 void PaintingSurface::read_into_bitmap(Bitmap& bitmap)
 {
@@ -126,7 +139,9 @@ SkSurface& PaintingSurface::sk_surface() const
 
 void PaintingSurface::notify_content_will_change()
 {
+    lock_context();
     m_impl->surface->notifyContentWillChange(SkSurface::kDiscard_ContentChangeMode);
+    unlock_context();
 }
 
 template<>
@@ -139,6 +154,20 @@ void PaintingSurface::flush()
 {
     if (on_flush)
         on_flush(*this);
+}
+
+void PaintingSurface::lock_context() const
+{
+    auto& context = m_impl->context;
+    if (context)
+        context->lock();
+}
+
+void PaintingSurface::unlock_context() const
+{
+    auto& context = m_impl->context;
+    if (context)
+        context->unlock();
 }
 
 }

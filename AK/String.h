@@ -60,7 +60,7 @@ public:
     [[nodiscard]] static String from_utf8_with_replacement_character(StringView, WithBOMHandling = WithBOMHandling::Yes);
 
     template<typename T>
-    requires(IsOneOf<RemoveCVReference<T>, ByteString, DeprecatedFlyString, FlyString, String>)
+    requires(IsOneOf<RemoveCVReference<T>, ByteString, FlyString, String>)
     static ErrorOr<String> from_utf8(T&&) = delete;
 
     [[nodiscard]] static String from_utf8_without_validation(ReadonlyBytes);
@@ -70,6 +70,8 @@ public:
 
     // Creates a new String from a sequence of UTF-16 encoded code points.
     static ErrorOr<String> from_utf16(Utf16View const&);
+    static ErrorOr<String> from_utf16_le(ReadonlyBytes);
+    static ErrorOr<String> from_utf16_be(ReadonlyBytes);
 
     // Creates a new String by reading byte_count bytes from a UTF-8 encoded Stream.
     static ErrorOr<String> from_stream(Stream&, size_t byte_count);
@@ -112,6 +114,7 @@ public:
 
     [[nodiscard]] String to_ascii_lowercase() const;
     [[nodiscard]] String to_ascii_uppercase() const;
+    [[nodiscard]] bool is_ascii() const { return bytes_as_string_view().is_ascii(); }
 
     // Compare this String against another string with caseless matching. Using this method requires linking LibUnicode into your application.
     [[nodiscard]] bool equals_ignoring_case(String const&) const;
@@ -138,10 +141,10 @@ public:
     [[nodiscard]] Utf8View code_points() const&& = delete;
 
     // Returns true if the String is zero-length.
-    [[nodiscard]] bool is_empty() const;
+    [[nodiscard]] bool is_empty() const { return byte_count() == 0; }
 
     // Returns a StringView covering the full length of the string. Note that iterating this will go byte-at-a-time, not code-point-at-a-time.
-    [[nodiscard]] StringView bytes_as_string_view() const&;
+    [[nodiscard]] StringView bytes_as_string_view() const& { return StringView(bytes()); }
     [[nodiscard]] StringView bytes_as_string_view() const&& = delete;
 
     [[nodiscard]] size_t count(StringView needle) const { return StringUtils::count(bytes_as_string_view(), needle); }
@@ -224,6 +227,11 @@ private:
 
     using ShortString = Detail::ShortString;
 
+    constexpr bool is_invalid() const
+    {
+        return raw(Badge<String> {}) == 0;
+    }
+
     explicit constexpr String(StringBase&& base)
         : StringBase(move(base))
     {
@@ -243,38 +251,38 @@ class Optional<String> : public OptionalBase<String> {
 public:
     using ValueType = String;
 
-    Optional() = default;
+    constexpr Optional() = default;
 
     template<SameAs<OptionalNone> V>
-    Optional(V) { }
+    constexpr Optional(V) { }
 
-    Optional(Optional<String> const& other)
+    constexpr Optional(Optional<String> const& other)
     {
         if (other.has_value())
             m_value = other.m_value;
     }
 
-    Optional(Optional&& other)
+    constexpr Optional(Optional&& other)
         : m_value(move(other.m_value))
     {
     }
 
     template<typename U = String>
     requires(!IsSame<OptionalNone, RemoveCVReference<U>>)
-    explicit(!IsConvertible<U&&, String>) Optional(U&& value)
+    explicit(!IsConvertible<U&&, String>) constexpr Optional(U&& value)
     requires(!IsSame<RemoveCVReference<U>, Optional<String>> && IsConstructible<String, U &&>)
         : m_value(forward<U>(value))
     {
     }
 
     template<SameAs<OptionalNone> V>
-    Optional& operator=(V)
+    constexpr Optional& operator=(V)
     {
         clear();
         return *this;
     }
 
-    Optional& operator=(Optional const& other)
+    constexpr Optional& operator=(Optional const& other)
     {
         if (this != &other) {
             m_value = other.m_value;
@@ -282,7 +290,7 @@ public:
         return *this;
     }
 
-    Optional& operator=(Optional&& other)
+    constexpr Optional& operator=(Optional&& other)
     {
         if (this != &other) {
             m_value = move(other.m_value);
@@ -290,37 +298,37 @@ public:
         return *this;
     }
 
-    void clear()
+    constexpr void clear()
     {
         m_value = String(nullptr);
     }
 
-    [[nodiscard]] bool has_value() const
+    [[nodiscard]] constexpr bool has_value() const
     {
         return !m_value.is_invalid();
     }
 
-    [[nodiscard]] String& value() &
+    [[nodiscard]] constexpr String& value() &
     {
         VERIFY(has_value());
         return m_value;
     }
 
-    [[nodiscard]] String const& value() const&
+    [[nodiscard]] constexpr String const& value() const&
     {
         VERIFY(has_value());
         return m_value;
     }
 
-    [[nodiscard]] String value() &&
+    [[nodiscard]] constexpr String value() &&
     {
         return release_value();
     }
 
-    [[nodiscard]] String release_value()
+    [[nodiscard]] constexpr String release_value()
     {
         VERIFY(has_value());
-        String released_value = m_value;
+        String released_value = move(m_value);
         clear();
         return released_value;
     }
@@ -348,5 +356,6 @@ struct ASCIICaseInsensitiveStringTraits : public Traits<String> {
 
 [[nodiscard]] ALWAYS_INLINE AK::String operator""_string(char const* cstring, size_t length)
 {
-    return AK::String::from_utf8(AK::StringView(cstring, length)).release_value();
+    ASSERT(Utf8View(AK::StringView(cstring, length)).validate());
+    return AK::String::from_utf8_without_validation({ cstring, length });
 }

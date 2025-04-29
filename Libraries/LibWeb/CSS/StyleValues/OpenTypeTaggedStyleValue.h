@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2024, Sam Atkins <sam@ladybird.org>
+ * Copyright (c) 2024-2025, Sam Atkins <sam@ladybird.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -16,29 +16,35 @@ namespace Web::CSS {
 // and the `<opentype-tag> <number>` construct for `font-variation-settings`.
 class OpenTypeTaggedStyleValue : public StyleValueWithDefaultOperators<OpenTypeTaggedStyleValue> {
 public:
-    static ValueComparingNonnullRefPtr<OpenTypeTaggedStyleValue> create(FlyString tag, ValueComparingNonnullRefPtr<CSSStyleValue> value)
+    enum class Mode {
+        FontFeatureSettings,
+        FontVariationSettings,
+    };
+    static ValueComparingNonnullRefPtr<OpenTypeTaggedStyleValue const> create(Mode mode, FlyString tag, ValueComparingNonnullRefPtr<CSSStyleValue const> value)
     {
-        return adopt_ref(*new (nothrow) OpenTypeTaggedStyleValue(move(tag), move(value)));
+        return adopt_ref(*new (nothrow) OpenTypeTaggedStyleValue(mode, move(tag), move(value)));
     }
     virtual ~OpenTypeTaggedStyleValue() override = default;
 
     FlyString const& tag() const { return m_tag; }
-    ValueComparingNonnullRefPtr<CSSStyleValue> const& value() const { return m_value; }
+    ValueComparingNonnullRefPtr<CSSStyleValue const> const& value() const { return m_value; }
 
     virtual String to_string(SerializationMode) const override;
 
     bool properties_equal(OpenTypeTaggedStyleValue const&) const;
 
 private:
-    explicit OpenTypeTaggedStyleValue(FlyString tag, ValueComparingNonnullRefPtr<CSSStyleValue> value)
+    explicit OpenTypeTaggedStyleValue(Mode mode, FlyString tag, ValueComparingNonnullRefPtr<CSSStyleValue const> value)
         : StyleValueWithDefaultOperators(Type::OpenTypeTagged)
+        , m_mode(mode)
         , m_tag(move(tag))
         , m_value(move(value))
     {
     }
 
+    Mode m_mode;
     FlyString m_tag;
-    ValueComparingNonnullRefPtr<CSSStyleValue> m_value;
+    ValueComparingNonnullRefPtr<CSSStyleValue const> m_value;
 };
 
 }

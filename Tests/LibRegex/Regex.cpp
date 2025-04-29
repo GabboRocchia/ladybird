@@ -253,20 +253,11 @@ TEST_CASE(catch_all_again)
     EXPECT_EQ(has_match("Hello World"sv, re), true);
 }
 
-TEST_CASE(char_utf8)
-{
-    Regex<PosixExtended> re("😀");
-    RegexResult result;
-
-    EXPECT_EQ((result = match(Utf8View { "Привет, мир! 😀 γειά σου κόσμος 😀 こんにちは世界"sv }, re, PosixFlags::Global)).success, true);
-    EXPECT_EQ(result.count, 2u);
-}
-
 TEST_CASE(catch_all_newline)
 {
     Regex<PosixExtended> re("^.*$", PosixFlags::Multiline);
     RegexResult result;
-    ByteString aaa = "Hello World\nTest\n1234\n";
+    String aaa = "Hello World\nTest\n1234\n"_string;
     auto lambda = [&]() {
         result = match(aaa, re);
         EXPECT_EQ(result.success, true);
@@ -283,7 +274,7 @@ TEST_CASE(catch_all_newline_view)
     Regex<PosixExtended> re("^.*$", PosixFlags::Multiline);
     RegexResult result;
 
-    ByteString aaa = "Hello World\nTest\n1234\n";
+    String aaa = "Hello World\nTest\n1234\n"_string;
     result = match(aaa, re);
     EXPECT_EQ(result.success, true);
     EXPECT_EQ(result.count, 3u);
@@ -313,7 +304,7 @@ TEST_CASE(catch_all_newline_2)
 TEST_CASE(match_all_character_class)
 {
     Regex<PosixExtended> re("[[:alpha:]]");
-    ByteString str = "[Window]\nOpacity=255\nAudibleBeep=0\n";
+    String str = "[Window]\nOpacity=255\nAudibleBeep=0\n"_string;
     RegexResult result = match(str, re, PosixFlags::Global);
 
     EXPECT_EQ(result.success, true);
@@ -326,7 +317,7 @@ TEST_CASE(match_all_character_class)
 TEST_CASE(match_character_class_with_assertion)
 {
     Regex<PosixExtended> re("[[:alpha:]]+$");
-    ByteString str = "abcdef";
+    String str = "abcdef"_string;
     RegexResult result = match(str, re);
 
     EXPECT_EQ(result.success, true);
@@ -382,7 +373,7 @@ TEST_CASE(ini_file_entries)
     }
 
     EXPECT_EQ(result.matches.at(0).view, "[Window]");
-    EXPECT_EQ(result.capture_group_matches.at(0).at(0).view, "Window");
+    EXPECT_EQ(result.capture_group_matches.at(0).at(1).view, "Window");
     EXPECT_EQ(result.matches.at(1).view, "Opacity=255");
     EXPECT_EQ(result.matches.at(1).line, 1u);
     EXPECT_EQ(result.matches.at(1).column, 0u);
@@ -421,15 +412,15 @@ TEST_CASE(named_capture_group)
         regex_dbg.print_bytecode(re);
     }
 
-    ByteString haystack = "[Window]\nOpacity=255\nAudibleBeep=0\n";
+    String haystack = "[Window]\nOpacity=255\nAudibleBeep=0\n"_string;
     EXPECT_EQ(re.search(haystack, result, PosixFlags::Multiline), true);
     EXPECT_EQ(result.count, 2u);
     EXPECT_EQ(result.matches.at(0).view, "Opacity=255");
     EXPECT_EQ(result.capture_group_matches.at(0).at(0).view, "255");
-    EXPECT_EQ(result.capture_group_matches.at(0).at(0).capture_group_name, "Test");
+    EXPECT_EQ(re.parser_result.bytecode.get_string(result.capture_group_matches.at(0).at(0).capture_group_name), "Test");
     EXPECT_EQ(result.matches.at(1).view, "AudibleBeep=0");
     EXPECT_EQ(result.capture_group_matches.at(1).at(0).view, "0");
-    EXPECT_EQ(result.capture_group_matches.at(1).at(0).capture_group_name, "Test");
+    EXPECT_EQ(re.parser_result.bytecode.get_string(result.capture_group_matches.at(1).at(0).capture_group_name), "Test");
 }
 
 TEST_CASE(ecma262_named_capture_group_with_dollar_sign)
@@ -444,15 +435,15 @@ TEST_CASE(ecma262_named_capture_group_with_dollar_sign)
         regex_dbg.print_bytecode(re);
     }
 
-    ByteString haystack = "[Window]\nOpacity=255\nAudibleBeep=0\n";
+    String haystack = "[Window]\nOpacity=255\nAudibleBeep=0\n"_string;
     EXPECT_EQ(re.search(haystack, result, ECMAScriptFlags::Multiline), true);
     EXPECT_EQ(result.count, 2u);
     EXPECT_EQ(result.matches.at(0).view, "Opacity=255");
     EXPECT_EQ(result.capture_group_matches.at(0).at(0).view, "255");
-    EXPECT_EQ(result.capture_group_matches.at(0).at(0).capture_group_name, "$Test$");
+    EXPECT_EQ(re.parser_result.bytecode.get_string(result.capture_group_matches.at(0).at(0).capture_group_name), "$Test$");
     EXPECT_EQ(result.matches.at(1).view, "AudibleBeep=0");
     EXPECT_EQ(result.capture_group_matches.at(1).at(0).view, "0");
-    EXPECT_EQ(result.capture_group_matches.at(1).at(0).capture_group_name, "$Test$");
+    EXPECT_EQ(re.parser_result.bytecode.get_string(result.capture_group_matches.at(1).at(0).capture_group_name), "$Test$");
 }
 
 TEST_CASE(a_star)
@@ -741,6 +732,10 @@ TEST_CASE(ECMA262_match)
         // Tests nested lookahead with alternation - verifies proper save/restore stack cleanup
         { "a(?=.(?=c)|b)b"sv, "ab"sv, true },
         { "(?=)(?=\\d)"sv, "smart"sv, false },
+        // Backrefs are cleared after lookaheads, the indices should be checked before lookup.
+        { "(?!(b))\\1"sv, "a"sv, false },
+        // String table merge bug: inverse map should be merged regardless of available direct mappings.
+        { "((?<x>a)|(?<x>b))"sv, "aa"sv, false },
     };
 
     for (auto& test : tests) {
@@ -1005,7 +1000,7 @@ TEST_CASE(case_insensitive_match)
 TEST_CASE(extremely_long_fork_chain)
 {
     Regex<ECMA262> re("(?:aa)*");
-    auto input = ByteString::repeated('a', 1000);
+    auto input = MUST(String::repeated('a', 1000));
     auto result = re.match(input);
     EXPECT_EQ(result.success, true);
 }
@@ -1033,7 +1028,7 @@ TEST_CASE(theoretically_infinite_loop)
     }
 }
 
-static auto g_lots_of_a_s = ByteString::repeated('a', 10'000'000);
+static auto g_lots_of_a_s = String::repeated('a', 10'000'000).release_value();
 
 BENCHMARK_CASE(fork_performance)
 {
@@ -1044,12 +1039,12 @@ BENCHMARK_CASE(fork_performance)
     }
     {
         Regex<ECMA262> re("(a+)+b");
-        auto result = re.match(g_lots_of_a_s.substring_view(0, 100));
+        auto result = re.match(g_lots_of_a_s.bytes_as_string_view().substring_view(0, 100));
         EXPECT_EQ(result.success, false);
     }
     {
         Regex<ECMA262> re("^(a|a?)+$");
-        auto input = ByteString::formatted("{}b", g_lots_of_a_s.substring_view(0, 100));
+        auto input = MUST(String::formatted("{}b", g_lots_of_a_s.bytes_as_string_view().substring_view(0, 100)));
         auto result = re.match(input);
         EXPECT_EQ(result.success, false);
     }
@@ -1142,6 +1137,8 @@ TEST_CASE(optimizer_alternation)
         Tuple { "(xxxxxxxxxxxxxxxxxxxxxxx|xxxxxxxxxxxxxxxxxxxxxxx)?b"sv, "xxxxxxxxxxxxxxxxxxxxxxx"sv, 0u },
         // Don't take the jump in JumpNonEmpty with nonexistent checkpoints (also don't crash).
         Tuple { "(?!\\d*|[g-ta-r]+|[h-l]|\\S|\\S|\\S){,9}|\\S{7,8}|\\d|(?<wnvdfimiwd>)|[c-mj-tb-o]*|\\s"sv, "rjvogg7pm|li4nmct mjb2|pk7s8e0"sv, 0u },
+        // Use the right offset when patching jumps through a fork-tree
+        Tuple { "(?!a)|(?!a)b"sv, "b"sv, 0u },
     };
 
     for (auto& test : tests) {
@@ -1288,5 +1285,14 @@ TEST_CASE(mismatching_brackets)
     for (auto const& test_case : test_cases) {
         Regex<ECMA262> re(test_case);
         EXPECT_EQ(re.parser_result.error, regex::Error::MismatchingBracket);
+    }
+}
+
+TEST_CASE(optimizer_repeat_offset)
+{
+    {
+        // Miscalculating the repeat offset in table reconstruction of alternatives would lead to crash here
+        // make sure that doesn't happen :)
+        Regex<ECMA262> re("\\/?\\??#?([\\/?#]|[\\uD800-\\uDBFF]|%[c-f][0-9a-f](%[89ab][0-9a-f]){0,2}(%[89ab]?)?|%[0-9a-f]?)$"sv);
     }
 }

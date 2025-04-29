@@ -44,14 +44,15 @@ public:
     CodeGenerationErrorOr<void> emit_function_declaration_instantiation(ECMAScriptFunctionObject const& function);
 
     [[nodiscard]] ScopedOperand allocate_register();
-    [[nodiscard]] ScopedOperand local(u32 local_index);
+    [[nodiscard]] ScopedOperand local(Identifier::Local const&);
     [[nodiscard]] ScopedOperand accumulator();
     [[nodiscard]] ScopedOperand this_value();
 
     void free_register(Register);
 
-    void set_local_initialized(u32 local_index);
+    void set_local_initialized(Identifier::Local const&);
     [[nodiscard]] bool is_local_initialized(u32 local_index) const;
+    [[nodiscard]] bool is_local_initialized(Identifier::Local const&) const;
 
     class SourceLocationScope {
     public:
@@ -125,6 +126,18 @@ public:
     void emit_with_extra_value_slots(size_t extra_operand_slots, Args&&... args)
     {
         emit_with_extra_slots<OpType, Value>(extra_operand_slots, forward<Args>(args)...);
+    }
+
+    void emit_mov(ScopedOperand const& dst, ScopedOperand const& src)
+    {
+        // Optimize away when the source is the destination
+        if (dst != src)
+            emit<Op::Mov>(dst, src);
+    }
+
+    void emit_mov(Operand const& dst, Operand const& src)
+    {
+        emit<Op::Mov>(dst, src);
     }
 
     void emit_jump_if(ScopedOperand const& condition, Label true_target, Label false_target);
@@ -274,8 +287,6 @@ public:
     void emit_return(ScopedOperand value)
     requires(IsOneOf<OpType, Op::Return, Op::Yield>)
     {
-        // FIXME: Tell the call sites about the `saved_return_value` destination
-        //        And take that into account in the movs below.
         perform_needed_unwinds<OpType>();
         if (must_enter_finalizer()) {
             VERIFY(m_current_basic_block->finalizer() != nullptr);
@@ -288,9 +299,7 @@ public:
                 emit<Bytecode::Op::PrepareYield>(Operand(Register::saved_return_value()), value);
             else
                 emit<Bytecode::Op::Mov>(Operand(Register::saved_return_value()), value);
-            emit<Bytecode::Op::Mov>(Operand(Register::exception()), add_constant(Value {}));
-            // FIXME: Do we really need to clear the return value register here?
-            emit<Bytecode::Op::Mov>(Operand(Register::return_value()), add_constant(Value {}));
+            emit<Bytecode::Op::Mov>(Operand(Register::exception()), add_constant(js_special_empty_value()));
             emit<Bytecode::Op::Jump>(Label { *m_current_basic_block->finalizer() });
             return;
         }
@@ -315,6 +324,12 @@ public:
     void emit_get_by_id(ScopedOperand dst, ScopedOperand base, IdentifierTableIndex property_identifier, Optional<IdentifierTableIndex> base_identifier = {});
 
     void emit_get_by_id_with_this(ScopedOperand dst, ScopedOperand base, IdentifierTableIndex, ScopedOperand this_value);
+
+    void emit_get_by_value(ScopedOperand dst, ScopedOperand base, ScopedOperand property, Optional<IdentifierTableIndex> base_identifier = {});
+    void emit_get_by_value_with_this(ScopedOperand dst, ScopedOperand base, ScopedOperand property, ScopedOperand this_value);
+
+    void emit_put_by_value(ScopedOperand base, ScopedOperand property, ScopedOperand src, Bytecode::Op::PropertyKind, Optional<IdentifierTableIndex> base_identifier);
+    void emit_put_by_value_with_this(ScopedOperand base, ScopedOperand property, ScopedOperand this_value, ScopedOperand src, Bytecode::Op::PropertyKind);
 
     void emit_iterator_value(ScopedOperand dst, ScopedOperand result);
     void emit_iterator_complete(ScopedOperand dst, ScopedOperand result);
@@ -397,6 +412,7 @@ private:
     Vector<ScopedOperand> m_home_objects;
 
     HashTable<u32> m_initialized_locals;
+    HashTable<u32> m_initialized_arguments;
 
     bool m_finished { false };
     bool m_must_propagate_completion { true };

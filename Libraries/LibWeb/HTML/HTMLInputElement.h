@@ -289,7 +289,7 @@ private:
     String convert_number_to_string(double input) const;
 
     WebIDL::ExceptionOr<GC::Ptr<JS::Date>> convert_string_to_date(StringView input) const;
-    String covert_date_to_string(GC::Ref<JS::Date> input) const;
+    String convert_date_to_string(GC::Ref<JS::Date> input) const;
 
     Optional<double> min() const;
     Optional<double> max() const;
@@ -389,6 +389,8 @@ private:
     bool m_has_uncommitted_changes { false };
 
     bool m_is_open { false };
+
+    void signal_a_type_change();
 };
 
 }

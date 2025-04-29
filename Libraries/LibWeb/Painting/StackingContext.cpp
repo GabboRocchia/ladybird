@@ -14,6 +14,7 @@
 #include <LibWeb/Layout/Box.h>
 #include <LibWeb/Layout/ReplacedBox.h>
 #include <LibWeb/Layout/Viewport.h>
+#include <LibWeb/Painting/Blending.h>
 #include <LibWeb/Painting/DisplayListRecorder.h>
 #include <LibWeb/Painting/PaintableBox.h>
 #include <LibWeb/Painting/SVGSVGPaintable.h>
@@ -93,8 +94,7 @@ void StackingContext::paint_node_as_stacking_context(Paintable const& paintable,
     paint_node(paintable, context, PaintPhase::Foreground);
     paint_descendants(context, paintable, StackingContextPaintPhase::Foreground);
     paint_node(paintable, context, PaintPhase::Outline);
-    if (paintable.document().highlighted_layout_node())
-        paint_node(paintable, context, PaintPhase::Overlay);
+    paint_node(paintable, context, PaintPhase::Overlay);
     paint_descendants(context, paintable, StackingContextPaintPhase::FocusAndOverlay);
 }
 
@@ -103,11 +103,11 @@ void StackingContext::paint_svg(PaintContext& context, PaintableBox const& paint
     if (phase != PaintPhase::Foreground)
         return;
 
-    paintable.apply_clip_overflow_rect(context, PaintPhase::Foreground);
+    paintable.before_paint(context, PaintPhase::Foreground);
     paint_node(paintable, context, PaintPhase::Background);
     paint_node(paintable, context, PaintPhase::Border);
     SVGSVGPaintable::paint_svg_box(context, paintable, phase);
-    paintable.clear_clip_overflow_rect(context, PaintPhase::Foreground);
+    paintable.after_paint(context, PaintPhase::Foreground);
 }
 
 void StackingContext::paint_descendants(PaintContext& context, Paintable const& paintable, StackingContextPaintPhase phase)
@@ -187,8 +187,7 @@ void StackingContext::paint_descendants(PaintContext& context, Paintable const& 
             break;
         case StackingContextPaintPhase::FocusAndOverlay:
             paint_node(child, context, PaintPhase::Outline);
-            if (child.document().highlighted_layout_node())
-                paint_node(child, context, PaintPhase::Overlay);
+            paint_node(child, context, PaintPhase::Overlay);
             paint_descendants(context, child, phase);
             break;
         }
@@ -280,8 +279,7 @@ void StackingContext::paint_internal(PaintContext& context) const
     paint_node(paintable_box(), context, PaintPhase::Outline);
 
     if (context.should_paint_overlay()) {
-        if (paintable_box().document().highlighted_layout_node())
-            paint_node(paintable_box(), context, PaintPhase::Overlay);
+        paint_node(paintable_box(), context, PaintPhase::Overlay);
         paint_descendants(context, paintable_box(), StackingContextPaintPhase::FocusAndOverlay);
     }
 }
@@ -316,16 +314,7 @@ void StackingContext::paint(PaintContext& context) const
     auto transform_matrix = paintable_box().transform();
     auto transform_origin = paintable_box().transform_origin().to_type<float>();
 
-    Gfx::CompositingAndBlendingOperator compositing_and_blending_operator;
-    switch (paintable_box().computed_values().mix_blend_mode()) {
-#undef __ENUMERATE
-#define __ENUMERATE(mix_blend_mode)                                                              \
-    case CSS::MixBlendMode::mix_blend_mode:                                                      \
-        compositing_and_blending_operator = Gfx::CompositingAndBlendingOperator::mix_blend_mode; \
-        break;
-        ENUMERATE_MIX_BLEND_MODES(__ENUMERATE)
-#undef __ENUMERATE
-    }
+    Gfx::CompositingAndBlendingOperator compositing_and_blending_operator = mix_blend_mode_to_compositing_and_blending_operator(paintable_box().computed_values().mix_blend_mode());
 
     DisplayListRecorder::PushStackingContextParams push_stacking_context_params {
         .opacity = opacity,

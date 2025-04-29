@@ -14,8 +14,8 @@
 #include <LibWeb/Bindings/ExceptionOrUtils.h>
 #include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/Compression/CompressionStream.h>
-#include <LibWeb/Streams/AbstractOperations.h>
 #include <LibWeb/Streams/TransformStream.h>
+#include <LibWeb/Streams/TransformStreamOperations.h>
 #include <LibWeb/WebIDL/AbstractOperations.h>
 
 namespace Web::Compression {
@@ -57,7 +57,7 @@ WebIDL::ExceptionOr<GC::Ref<CompressionStream>> CompressionStream::construct_imp
 
         if (auto result = stream->compress_and_enqueue_chunk(chunk); result.is_error()) {
             auto throw_completion = Bindings::exception_to_throw_completion(vm, result.exception());
-            return WebIDL::create_rejected_promise(realm, *throw_completion.release_value());
+            return WebIDL::create_rejected_promise(realm, throw_completion.release_value());
         }
 
         return WebIDL::create_resolved_promise(realm, JS::js_undefined());
@@ -70,7 +70,7 @@ WebIDL::ExceptionOr<GC::Ref<CompressionStream>> CompressionStream::construct_imp
 
         if (auto result = stream->compress_flush_and_enqueue(); result.is_error()) {
             auto throw_completion = Bindings::exception_to_throw_completion(vm, result.exception());
-            return WebIDL::create_rejected_promise(realm, *throw_completion.release_value());
+            return WebIDL::create_rejected_promise(realm, throw_completion.release_value());
         }
 
         return WebIDL::create_resolved_promise(realm, JS::js_undefined());
@@ -94,8 +94,8 @@ CompressionStream::~CompressionStream() = default;
 
 void CompressionStream::initialize(JS::Realm& realm)
 {
-    Base::initialize(realm);
     WEB_SET_PROTOTYPE_FOR_INTERFACE(CompressionStream);
+    Base::initialize(realm);
 }
 
 void CompressionStream::visit_edges(JS::Cell::Visitor& visitor)

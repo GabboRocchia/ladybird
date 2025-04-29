@@ -55,11 +55,6 @@ struct StaticPositionRect {
 };
 
 struct LayoutState {
-    LayoutState() = default;
-
-    explicit LayoutState(LayoutState const* parent);
-    ~LayoutState();
-
     struct UsedValues {
         NodeWithStyle const& node() const { return *m_node; }
         NodeWithStyle& node() { return const_cast<NodeWithStyle&>(*m_node); }
@@ -71,6 +66,8 @@ struct LayoutState {
         CSSPixels content_height() const { return m_content_height; }
         void set_content_width(CSSPixels);
         void set_content_height(CSSPixels);
+
+        CSSPixelSize content_size() const { return { content_width(), content_height() }; }
 
         void set_indefinite_content_width();
         void set_indefinite_content_height();
@@ -151,10 +148,10 @@ struct LayoutState {
         void set_computed_svg_transforms(Painting::SVGGraphicsPaintable::ComputedTransforms const& computed_transforms) { m_computed_svg_transforms = computed_transforms; }
         auto const& computed_svg_transforms() const { return m_computed_svg_transforms; }
 
-        void set_grid_template_columns(RefPtr<CSS::GridTrackSizeListStyleValue> used_values_for_grid_template_columns) { m_grid_template_columns = move(used_values_for_grid_template_columns); }
+        void set_grid_template_columns(RefPtr<CSS::GridTrackSizeListStyleValue const> used_values_for_grid_template_columns) { m_grid_template_columns = move(used_values_for_grid_template_columns); }
         auto const& grid_template_columns() const { return m_grid_template_columns; }
 
-        void set_grid_template_rows(RefPtr<CSS::GridTrackSizeListStyleValue> used_values_for_grid_template_rows) { m_grid_template_rows = move(used_values_for_grid_template_rows); }
+        void set_grid_template_rows(RefPtr<CSS::GridTrackSizeListStyleValue const> used_values_for_grid_template_rows) { m_grid_template_rows = move(used_values_for_grid_template_rows); }
         auto const& grid_template_rows() const { return m_grid_template_rows; }
 
         void set_static_position_rect(StaticPositionRect const& static_position_rect) { m_static_position_rect = static_position_rect; }
@@ -194,24 +191,21 @@ struct LayoutState {
         Optional<Gfx::Path> m_computed_svg_path;
         Optional<Painting::SVGGraphicsPaintable::ComputedTransforms> m_computed_svg_transforms;
 
-        RefPtr<CSS::GridTrackSizeListStyleValue> m_grid_template_columns;
-        RefPtr<CSS::GridTrackSizeListStyleValue> m_grid_template_rows;
+        RefPtr<CSS::GridTrackSizeListStyleValue const> m_grid_template_columns;
+        RefPtr<CSS::GridTrackSizeListStyleValue const> m_grid_template_rows;
 
         Optional<StaticPositionRect> m_static_position_rect;
     };
 
+    ~LayoutState();
+
     // Commits the used values produced by layout and builds a paintable tree.
     void commit(Box& root);
 
-    // NOTE: get_mutable() will CoW the UsedValues if it's inherited from an ancestor state;
     UsedValues& get_mutable(NodeWithStyle const&);
-
-    // NOTE: get() will not CoW the UsedValues.
     UsedValues const& get(NodeWithStyle const&) const;
 
     HashMap<GC::Ref<Layout::Node const>, NonnullOwnPtr<UsedValues>> used_values_per_layout_node;
-
-    LayoutState const* m_parent { nullptr };
 
 private:
     void resolve_relative_positions();

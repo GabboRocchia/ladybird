@@ -38,9 +38,8 @@ namespace JS {
         if (_temporary_result.is_error()) {                                                          \
             auto _completion = _temporary_result.release_error();                                    \
                                                                                                      \
-            VERIFY(_completion.value().has_value());                                                 \
-            VERIFY(_completion.value()->is_object());                                                \
-            VERIFY(::AK::is<JS::InternalError>(_completion.value()->as_object()));                   \
+            VERIFY(_completion.value().is_object());                                                 \
+            VERIFY(::AK::is<JS::InternalError>(_completion.value().as_object()));                    \
                                                                                                      \
             return _completion;                                                                      \
         }                                                                                            \
@@ -61,30 +60,24 @@ public:
         Throw,
     };
 
-    ALWAYS_INLINE Completion(Type type, Optional<Value> value)
+    ALWAYS_INLINE constexpr Completion(Type type, Value value)
         : m_type(type)
-        , m_value(move(value))
+        , m_value(value)
     {
-        VERIFY(type != Type::Empty);
-        if (m_value.has_value())
-            VERIFY(!m_value->is_empty());
+        ASSERT(type != Type::Empty);
+        ASSERT(!value.is_special_empty_value());
     }
 
     Completion(ThrowCompletionOr<Value> const&);
 
     // 5.2.3.1 Implicit Completion Values, https://tc39.es/ecma262/#sec-implicit-completion-values
     // Not `explicit` on purpose.
-    ALWAYS_INLINE Completion(Value value)
+    ALWAYS_INLINE constexpr Completion(Value value)
         : Completion(Type::Normal, value)
     {
     }
 
-    ALWAYS_INLINE Completion(Optional<Value> value)
-        : Completion(Type::Normal, move(value))
-    {
-    }
-
-    ALWAYS_INLINE Completion()
+    ALWAYS_INLINE constexpr Completion()
         : Completion(js_undefined())
     {
     }
@@ -94,40 +87,24 @@ public:
     Completion(Completion&&) = default;
     Completion& operator=(Completion&&) = default;
 
-    [[nodiscard]] Type type() const
+    [[nodiscard]] constexpr Type type() const
     {
         VERIFY(m_type != Type::Empty);
         return m_type;
     }
-    [[nodiscard]] Optional<Value>& value() { return m_value; }
-    [[nodiscard]] Optional<Value> const& value() const { return m_value; }
+    [[nodiscard]] constexpr Value& value() { return m_value; }
+    [[nodiscard]] constexpr Value const& value() const { return m_value; }
 
     // "abrupt completion refers to any completion with a [[Type]] value other than normal"
-    [[nodiscard]] bool is_abrupt() const { return m_type != Type::Normal; }
+    [[nodiscard]] constexpr bool is_abrupt() const { return m_type != Type::Normal; }
 
     // These are for compatibility with the TRY() macro in AK.
-    [[nodiscard]] bool is_error() const { return m_type == Type::Throw; }
-    [[nodiscard]] Optional<Value> release_value() { return move(m_value); }
-    Completion release_error()
+    [[nodiscard]] constexpr bool is_error() const { return m_type == Type::Throw; }
+    [[nodiscard]] constexpr Value release_value() { return m_value; }
+    constexpr Completion release_error()
     {
         VERIFY(is_error());
-        VERIFY(m_value.has_value());
         return { m_type, release_value() };
-    }
-
-    // 6.2.3.4 UpdateEmpty ( completionRecord, value ), https://tc39.es/ecma262/#sec-updateempty
-    Completion update_empty(Optional<Value> value) const
-    {
-        // 1. Assert: If completionRecord.[[Type]] is either return or throw, then completionRecord.[[Value]] is not empty.
-        if (m_type == Type::Return || m_type == Type::Throw)
-            VERIFY(m_value.has_value());
-
-        // 2. If completionRecord.[[Value]] is not empty, return ? completionRecord.
-        if (m_value.has_value())
-            return *this;
-
-        // 3. Return Completion Record { [[Type]]: completionRecord.[[Type]], [[Value]]: value, [[Target]]: completionRecord.[[Target]] }.
-        return { m_type, move(value) };
     }
 
 private:
@@ -135,18 +112,18 @@ private:
     };
     friend AK::Optional<Completion>;
 
-    Completion(EmptyTag)
+    constexpr Completion(EmptyTag)
         : m_type(Type::Empty)
     {
     }
 
-    bool is_empty() const
+    constexpr bool is_empty() const
     {
         return m_type == Type::Empty;
     }
 
     Type m_type { Type::Normal }; // [[Type]]
-    Optional<Value> m_value;      // [[Value]]
+    Value m_value;                // [[Value]]
     // NOTE: We don't need the [[Target]] slot since control flow is handled in bytecode.
 };
 
@@ -162,27 +139,27 @@ class Optional<JS::Completion> : public OptionalBase<JS::Completion> {
 public:
     using ValueType = JS::Completion;
 
-    Optional() = default;
+    constexpr Optional() = default;
 
-    Optional(Optional<JS::Completion> const& other)
+    constexpr Optional(Optional<JS::Completion> const& other)
     {
         if (other.has_value())
             m_value = other.m_value;
     }
 
-    Optional(Optional&& other)
+    constexpr Optional(Optional&& other)
         : m_value(move(other.m_value))
     {
     }
 
     template<typename U = JS::Completion>
-    explicit(!IsConvertible<U&&, JS::Completion>) Optional(U&& value)
+    explicit(!IsConvertible<U&&, JS::Completion>) constexpr Optional(U&& value)
     requires(!IsSame<RemoveCVReference<U>, Optional<JS::Completion>> && IsConstructible<JS::Completion, U &&>)
         : m_value(forward<U>(value))
     {
     }
 
-    Optional& operator=(Optional const& other)
+    constexpr Optional& operator=(Optional const& other)
     {
         if (this != &other) {
             clear();
@@ -191,7 +168,7 @@ public:
         return *this;
     }
 
-    Optional& operator=(Optional&& other)
+    constexpr Optional& operator=(Optional&& other)
     {
         if (this != &other) {
             clear();
@@ -200,34 +177,34 @@ public:
         return *this;
     }
 
-    void clear()
+    constexpr void clear()
     {
         m_value = JS::Completion(JS::Completion::EmptyTag {});
     }
 
-    [[nodiscard]] bool has_value() const
+    [[nodiscard]] constexpr bool has_value() const
     {
         return !m_value.is_empty();
     }
 
-    [[nodiscard]] JS::Completion& value() &
+    [[nodiscard]] constexpr JS::Completion& value() &
     {
         VERIFY(has_value());
         return m_value;
     }
 
-    [[nodiscard]] JS::Completion const& value() const&
+    [[nodiscard]] constexpr JS::Completion const& value() const&
     {
         VERIFY(has_value());
         return m_value;
     }
 
-    [[nodiscard]] JS::Completion value() &&
+    [[nodiscard]] constexpr JS::Completion value() &&
     {
         return release_value();
     }
 
-    [[nodiscard]] JS::Completion release_value()
+    [[nodiscard]] constexpr JS::Completion release_value()
     {
         VERIFY(has_value());
         JS::Completion released_value = m_value;
@@ -259,7 +236,7 @@ public:
 
     // Not `explicit` on purpose so that `return vm.throw_completion<Error>(...);` is possible.
     ALWAYS_INLINE ThrowCompletionOr(Completion throw_completion)
-        : m_value_or_error(ErrorValue { throw_completion.release_error().value().value() })
+        : m_value_or_error(ErrorValue { throw_completion.release_error().value() })
     {
     }
 
@@ -268,7 +245,7 @@ public:
         : m_value_or_error(move(value))
     {
         if constexpr (IsSame<ValueType, Value>)
-            VERIFY(!m_value_or_error.template get<ValueType>().is_empty());
+            VERIFY(!m_value_or_error.template get<ValueType>().is_special_empty_value());
     }
 
     ALWAYS_INLINE ThrowCompletionOr(ThrowCompletionOr const&) = default;
@@ -316,26 +293,52 @@ public:
         return Completion { Completion::Type::Throw, error.error };
     }
 
-    ValueType release_allocated_value_but_fixme_should_propagate_errors()
-    {
-        VERIFY(!is_error());
-        return release_value();
-    }
-
 private:
     Variant<ValueType, ErrorValue> m_value_or_error;
 };
 
 template<>
-class [[nodiscard]] ThrowCompletionOr<void> : public ThrowCompletionOr<Empty> {
+class [[nodiscard]] ThrowCompletionOr<void> {
 public:
-    using ThrowCompletionOr<Empty>::ThrowCompletionOr;
+    ALWAYS_INLINE ThrowCompletionOr()
+        : m_value(js_special_empty_value())
+    {
+    }
+
+    ALWAYS_INLINE ThrowCompletionOr(Empty)
+        : m_value(js_special_empty_value())
+    {
+    }
+
+    // Not `explicit` on purpose so that `return vm.throw_completion<Error>(...);` is possible.
+    ALWAYS_INLINE ThrowCompletionOr(Completion throw_completion)
+        : m_value(throw_completion.release_error().value())
+    {
+    }
+
+    ALWAYS_INLINE ThrowCompletionOr(ThrowCompletionOr const&) = default;
+    ALWAYS_INLINE ThrowCompletionOr& operator=(ThrowCompletionOr const&) = default;
+    ALWAYS_INLINE ThrowCompletionOr(ThrowCompletionOr&&) = default;
+    ALWAYS_INLINE ThrowCompletionOr& operator=(ThrowCompletionOr&&) = default;
+
+    [[nodiscard]] bool is_throw_completion() const { return !m_value.is_special_empty_value(); }
+    [[nodiscard]] Completion throw_completion() const { return error(); }
+    [[nodiscard]] Value error_value() const { return m_value; }
+
+    // These are for compatibility with the TRY() macro in AK.
+    [[nodiscard]] bool is_error() const { return !m_value.is_special_empty_value(); }
+    Empty release_value() { return {}; }
+    Completion error() const { return Completion { Completion::Type::Throw, m_value }; }
+    Completion release_error() { return error(); }
+
+private:
+    Value m_value;
 };
 
 ThrowCompletionOr<Value> await(VM&, Value);
 
 // 6.2.4.1 NormalCompletion ( value ), https://tc39.es/ecma262/#sec-normalcompletion
-inline Completion normal_completion(Optional<Value> value)
+inline Completion normal_completion(Value value)
 {
     // 1. Return Completion Record { [[Type]]: normal, [[Value]]: value, [[Target]]: empty }.
     return { Completion::Type::Normal, move(value) };

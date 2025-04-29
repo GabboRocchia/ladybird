@@ -37,7 +37,7 @@ inline ErrorOr<T> decode(Decoder&)
 
 class Decoder {
 public:
-    Decoder(Stream& stream, Queue<IPC::File>& files)
+    Decoder(Stream& stream, Queue<File>& files)
         : m_stream(stream)
         , m_files(files)
     {
@@ -62,11 +62,11 @@ public:
     ErrorOr<size_t> decode_size();
 
     Stream& stream() { return m_stream; }
-    Queue<IPC::File>& files() { return m_files; }
+    Queue<File>& files() { return m_files; }
 
 private:
     Stream& m_stream;
-    Queue<IPC::File>& m_files;
+    Queue<File>& m_files;
 };
 
 template<Arithmetic T>

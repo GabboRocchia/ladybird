@@ -51,7 +51,8 @@ struct CacheablePropertyMetadata {
     GC::Ptr<Object const> prototype;
 };
 
-class Object : public Cell {
+class Object : public Cell
+    , public Weakable<Object> {
     GC_CELL(Object, Cell);
     GC_DECLARE_ALLOCATOR(Object);
 
@@ -189,13 +190,27 @@ public:
     void define_native_accessor(Realm&, PropertyKey const&, ESCAPING Function<ThrowCompletionOr<Value>(VM&)> getter, ESCAPING Function<ThrowCompletionOr<Value>(VM&)> setter, PropertyAttributes attributes);
 
     virtual bool is_dom_node() const { return false; }
+    virtual bool is_dom_event() const { return false; }
+    virtual bool is_html_window() const { return false; }
+    virtual bool is_html_window_proxy() const { return false; }
+    virtual bool is_html_location() const { return false; }
+
     virtual bool is_function() const { return false; }
+    virtual bool is_promise() const { return false; }
+    virtual bool is_error_object() const { return false; }
+    virtual bool is_date() const { return false; }
+    virtual bool is_number_object() const { return false; }
+    virtual bool is_boolean_object() const { return false; }
+    virtual bool is_regexp_object() const { return false; }
+    virtual bool is_bigint_object() const { return false; }
     virtual bool is_string_object() const { return false; }
+    virtual bool is_array_exotic_object() const { return false; }
     virtual bool is_global_object() const { return false; }
     virtual bool is_proxy_object() const { return false; }
     virtual bool is_native_function() const { return false; }
     virtual bool is_ecmascript_function_object() const { return false; }
     virtual bool is_array_iterator() const { return false; }
+    virtual bool is_raw_json_object() const { return false; }
 
     // B.3.7 The [[IsHTMLDDA]] Internal Slot, https://tc39.es/ecma262/#sec-IsHTMLDDA-internal-slot
     virtual bool is_htmldda() const { return false; }
@@ -239,6 +254,8 @@ protected:
     Object(Realm&, Object* prototype, MayInterfereWithIndexedPropertyAccess = MayInterfereWithIndexedPropertyAccess::No);
     Object(ConstructWithPrototypeTag, Object& prototype, MayInterfereWithIndexedPropertyAccess = MayInterfereWithIndexedPropertyAccess::No);
     explicit Object(Shape&, MayInterfereWithIndexedPropertyAccess = MayInterfereWithIndexedPropertyAccess::No);
+
+    void unsafe_set_shape(Shape&);
 
     // [[Extensible]]
     bool m_is_extensible { true };

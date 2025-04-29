@@ -176,7 +176,7 @@ Optional<FormattingContext::Type> FormattingContext::formatting_context_type_cre
 // FIXME: This is a hack. Get rid of it.
 struct ReplacedFormattingContext : public FormattingContext {
     ReplacedFormattingContext(LayoutState& state, LayoutMode layout_mode, Box const& box)
-        : FormattingContext(Type::Block, layout_mode, state, box)
+        : FormattingContext(Type::InternalReplaced, layout_mode, state, box)
     {
     }
     virtual CSSPixels automatic_content_width() const override { return 0; }
@@ -187,7 +187,7 @@ struct ReplacedFormattingContext : public FormattingContext {
 // FIXME: This is a hack. Get rid of it.
 struct DummyFormattingContext : public FormattingContext {
     DummyFormattingContext(LayoutState& state, LayoutMode layout_mode, Box const& box)
-        : FormattingContext(Type::Block, layout_mode, state, box)
+        : FormattingContext(Type::InternalDummy, layout_mode, state, box)
     {
     }
     virtual CSSPixels automatic_content_width() const override { return 0; }
@@ -437,7 +437,7 @@ CSSPixels FormattingContext::compute_table_box_width_inside_table_wrapper(Box co
     });
     VERIFY(table_box.has_value());
 
-    LayoutState throwaway_state(&m_state);
+    LayoutState throwaway_state;
 
     auto& table_box_state = throwaway_state.get_mutable(*table_box);
     auto const& table_box_computed_values = table_box->computed_values();
@@ -476,7 +476,8 @@ CSSPixels FormattingContext::compute_table_box_height_inside_table_wrapper(Box c
     // table-wrapper can't have borders or paddings but it might have margin taken from table-root.
     auto available_height = height_of_containing_block - margin_top.to_px(box) - margin_bottom.to_px(box);
 
-    LayoutState throwaway_state(&m_state);
+    LayoutState throwaway_state;
+
     auto context = create_independent_formatting_context_if_needed(throwaway_state, LayoutMode::IntrinsicSizing, box);
     VERIFY(context);
     context->run(m_state.get(box).available_inner_space_or_constraints_from(available_space));
@@ -1181,10 +1182,9 @@ void FormattingContext::compute_height_for_absolutely_positioned_non_replaced_el
 
 CSSPixelRect FormattingContext::content_box_rect_in_static_position_ancestor_coordinate_space(Box const& box, Box const& ancestor_box) const
 {
-    auto rect = content_box_rect(box);
-    if (&box == &ancestor_box)
-        return rect;
-    for (auto const* current = box.static_position_containing_block(); current; current = current->static_position_containing_block()) {
+    auto box_used_values = m_state.get(box);
+    CSSPixelRect rect = { { 0, 0 }, box_used_values.content_size() };
+    for (auto const* current = &box; current; current = current->static_position_containing_block()) {
         if (current == &ancestor_box)
             return rect;
         auto const& current_state = m_state.get(*current);
@@ -1454,7 +1454,7 @@ CSSPixels FormattingContext::calculate_min_content_width(Layout::Box const& box)
     if (cache.has_value())
         return cache.value();
 
-    LayoutState throwaway_state(&m_state);
+    LayoutState throwaway_state;
 
     auto& box_state = throwaway_state.get_mutable(box);
     box_state.width_constraint = SizeConstraint::MinContent;
@@ -1486,7 +1486,7 @@ CSSPixels FormattingContext::calculate_max_content_width(Layout::Box const& box)
     if (cache.has_value())
         return cache.value();
 
-    LayoutState throwaway_state(&m_state);
+    LayoutState throwaway_state;
 
     auto& box_state = throwaway_state.get_mutable(box);
     box_state.width_constraint = SizeConstraint::MaxContent;
@@ -1523,7 +1523,7 @@ CSSPixels FormattingContext::calculate_min_content_height(Layout::Box const& box
     if (cache.has_value())
         return cache.value();
 
-    LayoutState throwaway_state(&m_state);
+    LayoutState throwaway_state;
 
     auto& box_state = throwaway_state.get_mutable(box);
     box_state.height_constraint = SizeConstraint::MinContent;
@@ -1554,7 +1554,7 @@ CSSPixels FormattingContext::calculate_max_content_height(Layout::Box const& box
     if (cache_slot.has_value())
         return cache_slot.value();
 
-    LayoutState throwaway_state(&m_state);
+    LayoutState throwaway_state;
 
     auto& box_state = throwaway_state.get_mutable(box);
     box_state.height_constraint = SizeConstraint::MaxContent;
@@ -1760,7 +1760,7 @@ bool FormattingContext::can_skip_is_anonymous_text_run(Box& box)
 CSSPixelRect FormattingContext::absolute_content_rect(Box const& box) const
 {
     auto const& box_state = m_state.get(box);
-    CSSPixelRect rect { box_state.offset, { box_state.content_width(), box_state.content_height() } };
+    CSSPixelRect rect { box_state.offset, box_state.content_size() };
     for (auto* block = box_state.containing_block_used_values(); block; block = block->containing_block_used_values())
         rect.translate_by(block->offset);
     return rect;
@@ -1824,13 +1824,16 @@ CSSPixels FormattingContext::box_baseline(Box const& box) const
     return box_state.margin_box_height();
 }
 
-CSSPixelRect FormattingContext::margin_box_rect(LayoutState::UsedValues const& used_values) const
+[[nodiscard]] static CSSPixelRect margin_box_rect(LayoutState::UsedValues const& used_values)
 {
     return {
-        used_values.offset.translated(-used_values.margin_box_left(), -used_values.margin_box_top()),
         {
-            used_values.margin_box_left() + used_values.content_width() + used_values.margin_box_right(),
-            used_values.margin_box_top() + used_values.content_height() + used_values.margin_box_bottom(),
+            -max(used_values.margin_box_left(), 0),
+            -max(used_values.margin_box_top(), 0),
+        },
+        {
+            max(used_values.margin_box_left(), 0) + used_values.content_width() + max(used_values.margin_box_right(), 0),
+            max(used_values.margin_box_top(), 0) + used_values.content_height() + max(used_values.margin_box_bottom(), 0),
         },
     };
 }
@@ -1842,15 +1845,13 @@ CSSPixelRect FormattingContext::content_box_rect(Box const& box) const
 
 CSSPixelRect FormattingContext::content_box_rect(LayoutState::UsedValues const& used_values) const
 {
-    return CSSPixelRect { used_values.offset, { used_values.content_width(), used_values.content_height() } };
+    return CSSPixelRect { used_values.offset, used_values.content_size() };
 }
 
 CSSPixelRect FormattingContext::content_box_rect_in_ancestor_coordinate_space(LayoutState::UsedValues const& used_values, Box const& ancestor_box) const
 {
-    auto rect = content_box_rect(used_values);
-    if (&used_values.node() == &ancestor_box)
-        return rect;
-    for (auto const* current = used_values.containing_block_used_values(); current; current = current->containing_block_used_values()) {
+    CSSPixelRect rect = { { 0, 0 }, used_values.content_size() };
+    for (auto const* current = &used_values; current; current = current->containing_block_used_values()) {
         if (&current->node() == &ancestor_box)
             return rect;
         rect.translate_by(current->offset);
@@ -1862,9 +1863,7 @@ CSSPixelRect FormattingContext::content_box_rect_in_ancestor_coordinate_space(La
 CSSPixelRect FormattingContext::margin_box_rect_in_ancestor_coordinate_space(LayoutState::UsedValues const& used_values, Box const& ancestor_box) const
 {
     auto rect = margin_box_rect(used_values);
-    if (&used_values.node() == &ancestor_box)
-        return rect;
-    for (auto const* current = used_values.containing_block_used_values(); current; current = current->containing_block_used_values()) {
+    for (auto const* current = &used_values; current; current = current->containing_block_used_values()) {
         if (&current->node() == &ancestor_box)
             return rect;
         rect.translate_by(current->offset);
@@ -1894,11 +1893,9 @@ bool box_is_sized_as_replaced_element(Box const& box)
         // However, it is suggested that, if the containing block’s width does not itself depend on the replaced element’s width,
         // then the used value of width is calculated from the constraint equation used for block-level, non-replaced elements in normal flow.
 
-        // AD-HOC: For inline-level boxes, we don't want to end up in a situation where we apply stretch-fit sizing,
-        //         since that would not match other browsers. Because of that, we specifically reject this case here
-        //         instead of allowing it to proceed.
-        if (box.display().is_inline_outside()
-            && box.computed_values().height().is_auto()
+        // AD-HOC: If box has preferred aspect ratio but width and height are not specified, then we should
+        //         size it as a normal box to match other browsers.
+        if (box.computed_values().height().is_auto()
             && box.computed_values().width().is_auto()
             && !box.has_natural_width()
             && !box.has_natural_height()) {
@@ -1917,8 +1914,6 @@ bool FormattingContext::should_treat_max_width_as_none(Box const& box, Available
         return true;
     if (available_width.is_max_content() && max_width.is_max_content())
         return true;
-    if (box.is_absolutely_positioned())
-        return false;
     if (max_width.contains_percentage()) {
         if (available_width.is_max_content())
             return true;
@@ -1945,8 +1940,6 @@ bool FormattingContext::should_treat_max_height_as_none(Box const& box, Availabl
     auto const& max_height = box.computed_values().max_height();
     if (max_height.is_none())
         return true;
-    if (box.is_absolutely_positioned())
-        return false;
     if (max_height.contains_percentage()) {
         if (available_height.is_min_content())
             return false;

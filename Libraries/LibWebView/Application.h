@@ -26,6 +26,8 @@
 
 namespace WebView {
 
+struct ApplicationSettingsObserver;
+
 class Application : public DevTools::DevToolsDelegate {
     AK_MAKE_NONCOPYABLE(Application);
 
@@ -46,6 +48,8 @@ public:
 
     static CookieJar& cookie_jar() { return *the().m_cookie_jar; }
 
+    static ProcessManager& process_manager() { return the().m_process_manager; }
+
     Core::EventLoop& event_loop() { return m_event_loop; }
 
     ErrorOr<NonnullRefPtr<WebContentClient>> launch_web_content_process(ViewImplementation&);
@@ -58,11 +62,6 @@ public:
     void set_process_mach_port(pid_t, Core::MachPort&&);
 #endif
     Optional<Process&> find_process(pid_t);
-
-    void send_updated_process_statistics_to_view(ViewImplementation&);
-
-    void send_current_settings_to_view(ViewImplementation&);
-    void send_available_search_engines_to_view(ViewImplementation&);
 
     ErrorOr<LexicalPath> path_for_downloaded_file(StringView file) const;
 
@@ -134,6 +133,7 @@ private:
     static Application* s_the;
 
     Settings m_settings;
+    OwnPtr<ApplicationSettingsObserver> m_settings_observer;
 
     BrowserOptions m_browser_options;
     WebContentOptions m_web_content_options;

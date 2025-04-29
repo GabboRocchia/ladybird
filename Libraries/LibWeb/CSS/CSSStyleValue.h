@@ -18,6 +18,7 @@
 #include <AK/Vector.h>
 #include <AK/WeakPtr.h>
 #include <LibGfx/Color.h>
+#include <LibJS/Heap/Cell.h>
 #include <LibURL/URL.h>
 #include <LibWeb/CSS/Keyword.h>
 #include <LibWeb/CSS/Length.h>
@@ -105,6 +106,7 @@ public:
         FilterValueList,
         FitContent,
         Flex,
+        FontSource,
         FontVariant,
         Frequency,
         GridAutoFlow,
@@ -132,6 +134,7 @@ public:
         Time,
         Transformation,
         Transition,
+        UnicodeRange,
         Unresolved,
         URL,
         ValueList,
@@ -173,6 +176,7 @@ public:
     bool is_color() const { return type() == Type::Color; }
     CSSColorValue const& as_color() const;
     CSSColorValue& as_color() { return const_cast<CSSColorValue&>(const_cast<CSSStyleValue const&>(*this).as_color()); }
+    virtual bool is_color_function() const { return false; }
 
     bool is_color_scheme() const { return type() == Type::ColorScheme; }
     ColorSchemeStyleValue const& as_color_scheme() const;
@@ -225,6 +229,10 @@ public:
     bool is_flex() const { return type() == Type::Flex; }
     FlexStyleValue const& as_flex() const;
     FlexStyleValue& as_flex() { return const_cast<FlexStyleValue&>(const_cast<CSSStyleValue const&>(*this).as_flex()); }
+
+    bool is_font_source() const { return type() == Type::FontSource; }
+    FontSourceStyleValue const& as_font_source() const;
+    FontSourceStyleValue& as_font_source() { return const_cast<FontSourceStyleValue&>(const_cast<CSSStyleValue const&>(*this).as_font_source()); }
 
     bool is_frequency() const { return type() == Type::Frequency; }
     FrequencyStyleValue const& as_frequency() const;
@@ -330,6 +338,10 @@ public:
     TransitionStyleValue const& as_transition() const;
     TransitionStyleValue& as_transition() { return const_cast<TransitionStyleValue&>(const_cast<CSSStyleValue const&>(*this).as_transition()); }
 
+    bool is_unicode_range() const { return type() == Type::UnicodeRange; }
+    UnicodeRangeStyleValue const& as_unicode_range() const;
+    UnicodeRangeStyleValue& as_unicode_range() { return const_cast<UnicodeRangeStyleValue&>(const_cast<CSSStyleValue const&>(*this).as_unicode_range()); }
+
     bool is_unresolved() const { return type() == Type::Unresolved; }
     UnresolvedStyleValue const& as_unresolved() const;
     UnresolvedStyleValue& as_unresolved() { return const_cast<UnresolvedStyleValue&>(const_cast<CSSStyleValue const&>(*this).as_unresolved()); }
@@ -369,6 +381,9 @@ public:
     [[nodiscard]] int to_font_slope() const;
     [[nodiscard]] int to_font_width() const;
 
+    virtual void set_style_sheet(GC::Ptr<CSSStyleSheet>) { }
+    virtual void visit_edges(JS::Cell::Visitor&) const { }
+
     virtual bool equals(CSSStyleValue const& other) const = 0;
 
     bool operator==(CSSStyleValue const& other) const
@@ -386,6 +401,7 @@ private:
 template<typename T>
 struct StyleValueWithDefaultOperators : public CSSStyleValue {
     using CSSStyleValue::CSSStyleValue;
+    using Base = CSSStyleValue;
 
     virtual bool equals(CSSStyleValue const& other) const override
     {

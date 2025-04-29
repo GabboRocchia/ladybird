@@ -1,14 +1,14 @@
 /*
- * Copyright (c) 2024, Aliaksandr Kalenik <kalenik.aliaksandr@gmail.com>
+ * Copyright (c) 2024-2025, Aliaksandr Kalenik <kalenik.aliaksandr@gmail.com>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
 #pragma once
 
+#include <AK/AtomicRefCounted.h>
 #include <AK/Function.h>
 #include <AK/NonnullOwnPtr.h>
-#include <AK/RefCounted.h>
 #include <AK/RefPtr.h>
 #include <LibGfx/Color.h>
 #include <LibGfx/Size.h>
@@ -23,7 +23,7 @@ class SkSurface;
 
 namespace Gfx {
 
-class PaintingSurface : public RefCounted<PaintingSurface> {
+class PaintingSurface : public AtomicRefCounted<PaintingSurface> {
 public:
     enum class Origin {
         TopLeft,
@@ -56,6 +56,9 @@ public:
     void flush();
 
     ~PaintingSurface();
+
+    void lock_context() const;
+    void unlock_context() const;
 
 private:
     struct Impl;

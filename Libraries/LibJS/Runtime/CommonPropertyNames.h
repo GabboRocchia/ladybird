@@ -91,7 +91,6 @@ namespace JS {
     P(construct)                             \
     P(constructor)                           \
     P(containing)                            \
-    P(continuation)                          \
     P(copyWithin)                            \
     P(cos)                                   \
     P(cosh)                                  \
@@ -277,7 +276,6 @@ namespace JS {
     P(Intl)                                  \
     P(is)                                    \
     P(isArray)                               \
-    P(isAwait)                               \
     P(isDisjointFrom)                        \
     P(isError)                               \
     P(isExtensible)                          \
@@ -287,6 +285,7 @@ namespace JS {
     P(isLockFree)                            \
     P(isNaN)                                 \
     P(isPrototypeOf)                         \
+    P(isRawJSON)                             \
     P(isSafeInteger)                         \
     P(isSealed)                              \
     P(isSubsetOf)                            \
@@ -405,11 +404,11 @@ namespace JS {
     P(race)                                  \
     P(random)                                \
     P(raw)                                   \
+    P(rawJSON)                               \
     P(read)                                  \
     P(reason)                                \
     P(reduce)                                \
     P(reduceRight)                           \
-    P(result)                                \
     P(Reflect)                               \
     P(RegExp)                                \
     P(region)                                \

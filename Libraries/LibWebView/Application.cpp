@@ -5,7 +5,6 @@
  */
 
 #include <AK/Debug.h>
-#include <AK/JsonArraySerializer.h>
 #include <LibCore/ArgsParser.h>
 #include <LibCore/Environment.h>
 #include <LibCore/StandardPaths.h>
@@ -27,11 +26,31 @@ namespace WebView {
 
 Application* Application::s_the = nullptr;
 
+struct ApplicationSettingsObserver : public SettingsObserver {
+    virtual void dns_settings_changed() override
+    {
+        Application::settings().dns_settings().visit(
+            [](SystemDNS) {
+                Application::request_server_client().async_set_use_system_dns();
+            },
+            [](DNSOverTLS const& dns_over_tls) {
+                dbgln("Setting DNS server to {}:{} with TLS", dns_over_tls.server_address, dns_over_tls.port);
+                Application::request_server_client().async_set_dns_server(dns_over_tls.server_address, dns_over_tls.port, true);
+            },
+            [](DNSOverUDP const& dns_over_udp) {
+                dbgln("Setting DNS server to {}:{}", dns_over_udp.server_address, dns_over_udp.port);
+                Application::request_server_client().async_set_dns_server(dns_over_udp.server_address, dns_over_udp.port, false);
+            });
+    }
+};
+
 Application::Application()
     : m_settings(Settings::create({}))
 {
     VERIFY(!s_the);
     s_the = this;
+
+    m_settings_observer = make<ApplicationSettingsObserver>();
 
     // No need to monitor the system time zone if the TZ environment variable is set, as it overrides system preferences.
     if (!Core::Environment::has("TZ"sv)) {
@@ -56,6 +75,9 @@ Application::Application()
 
 Application::~Application()
 {
+    // Explicitly delete the settings observer first, as the observer destructor will refer to Application::the().
+    m_settings_observer.clear();
+
     s_the = nullptr;
 }
 
@@ -165,10 +187,10 @@ void Application::initialize(Main::Arguments const& arguments)
         .debug_helper_process = move(debug_process_type),
         .profile_helper_process = move(profile_process_type),
         .dns_settings = (dns_server_address.has_value()
-                ? (use_dns_over_tls
+                ? Optional<DNSSettings> { use_dns_over_tls
                           ? DNSSettings(DNSOverTLS(dns_server_address.release_value(), *dns_server_port))
-                          : DNSSettings(DNSOverUDP(dns_server_address.release_value(), *dns_server_port)))
-                : SystemDNS {}),
+                          : DNSSettings(DNSOverUDP(dns_server_address.release_value(), *dns_server_port)) }
+                : OptionalNone()),
         .devtools_port = devtools_port,
     };
 
@@ -262,6 +284,10 @@ ErrorOr<void> Application::launch_request_server()
 {
     // FIXME: Create an abstraction to re-spawn the RequestServer and re-hook up its client hooks to each tab on crash
     m_request_server_client = TRY(launch_request_server_process());
+
+    if (m_browser_options.dns_settings.has_value())
+        m_settings.set_dns_settings(m_browser_options.dns_settings.value(), true);
+
     return {};
 }
 
@@ -322,48 +348,6 @@ void Application::set_process_mach_port(pid_t pid, Core::MachPort&& port)
 Optional<Process&> Application::find_process(pid_t pid)
 {
     return m_process_manager.find_process(pid);
-}
-
-void Application::send_updated_process_statistics_to_view(ViewImplementation& view)
-{
-    m_process_manager.update_all_process_statistics();
-    auto statistics = m_process_manager.serialize_json();
-
-    StringBuilder builder;
-    builder.append("processes.loadProcessStatistics(\""sv);
-    builder.append_escaped_for_json(statistics);
-    builder.append("\");"sv);
-
-    view.run_javascript(MUST(builder.to_string()));
-}
-
-void Application::send_current_settings_to_view(ViewImplementation& view)
-{
-    auto settings = m_settings.serialize_json();
-
-    StringBuilder builder;
-    builder.append("settings.loadSettings(\""sv);
-    builder.append_escaped_for_json(settings);
-    builder.append("\");"sv);
-
-    view.run_javascript(MUST(builder.to_string()));
-}
-
-void Application::send_available_search_engines_to_view(ViewImplementation& view)
-{
-    StringBuilder engines;
-
-    auto serializer = MUST(JsonArraySerializer<>::try_create(engines));
-    for (auto const& engine : search_engines())
-        MUST(serializer.add(engine.name));
-    MUST(serializer.finish());
-
-    StringBuilder builder;
-    builder.append("settings.loadSearchEngines(\""sv);
-    builder.append_escaped_for_json(engines.string_view());
-    builder.append("\");"sv);
-
-    view.run_javascript(MUST(builder.to_string()));
 }
 
 void Application::process_did_exit(Process&& process)
@@ -555,8 +539,8 @@ static void edit_dom_node(DevTools::TabDescription const& description, Applicati
         return;
     }
 
-    view->on_finshed_editing_dom_node = [&view = *view, on_complete = move(on_complete)](auto node_id) {
-        view.on_finshed_editing_dom_node = nullptr;
+    view->on_finished_editing_dom_node = [&view = *view, on_complete = move(on_complete)](auto node_id) {
+        view.on_finished_editing_dom_node = nullptr;
 
         if (node_id.has_value())
             on_complete(*node_id);
@@ -730,7 +714,7 @@ void Application::listen_for_console_messages(DevTools::TabDescription const& de
         return;
 
     view->on_console_message_available = move(on_console_message_available);
-    view->on_received_unstyled_console_messages = move(on_received_console_output);
+    view->on_received_console_messages = move(on_received_console_output);
     view->js_console_request_messages(0);
 }
 
@@ -741,7 +725,7 @@ void Application::stop_listening_for_console_messages(DevTools::TabDescription c
         return;
 
     view->on_console_message_available = nullptr;
-    view->on_received_unstyled_console_messages = nullptr;
+    view->on_received_console_messages = nullptr;
 }
 
 void Application::request_console_messages(DevTools::TabDescription const& description, i32 start_index) const

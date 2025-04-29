@@ -32,8 +32,8 @@ CustomElementRegistry::~CustomElementRegistry() = default;
 
 void CustomElementRegistry::initialize(JS::Realm& realm)
 {
-    Base::initialize(realm);
     WEB_SET_PROTOTYPE_FOR_INTERFACE(CustomElementRegistry);
+    Base::initialize(realm);
 }
 
 void CustomElementRegistry::visit_edges(Visitor& visitor)
@@ -124,7 +124,7 @@ JS::ThrowCompletionOr<void> CustomElementRegistry::define(String const& name, We
 
     // 2. If name is not a valid custom element name, then throw a "SyntaxError" DOMException.
     if (!is_valid_custom_element_name(name))
-        return JS::throw_completion(WebIDL::SyntaxError::create(realm, MUST(String::formatted("'{}' is not a valid custom element name"sv, name))));
+        return JS::throw_completion(WebIDL::SyntaxError::create(realm, MUST(String::formatted("'{}' is not a valid custom element name", name))));
 
     // 3. If this's custom element definition set contains an item with name name, then throw a "NotSupportedError" DOMException.
     auto existing_definition_with_name_iterator = m_custom_element_definitions.find_if([&name](auto const& definition) {
@@ -132,7 +132,7 @@ JS::ThrowCompletionOr<void> CustomElementRegistry::define(String const& name, We
     });
 
     if (existing_definition_with_name_iterator != m_custom_element_definitions.end())
-        return JS::throw_completion(WebIDL::NotSupportedError::create(realm, MUST(String::formatted("A custom element with name '{}' is already defined"sv, name))));
+        return JS::throw_completion(WebIDL::NotSupportedError::create(realm, MUST(String::formatted("A custom element with name '{}' is already defined", name))));
 
     // 4. If this's custom element definition set contains an item with constructor constructor, then throw a "NotSupportedError" DOMException.
     auto existing_definition_with_constructor_iterator = m_custom_element_definitions.find_if([&constructor](auto const& definition) {
@@ -152,13 +152,13 @@ JS::ThrowCompletionOr<void> CustomElementRegistry::define(String const& name, We
     if (extends.has_value()) {
         // 1. If extends is a valid custom element name, then throw a "NotSupportedError" DOMException.
         if (is_valid_custom_element_name(extends.value()))
-            return JS::throw_completion(WebIDL::NotSupportedError::create(realm, MUST(String::formatted("'{}' is a custom element name, only non-custom elements can be extended"sv, extends.value()))));
+            return JS::throw_completion(WebIDL::NotSupportedError::create(realm, MUST(String::formatted("'{}' is a custom element name, only non-custom elements can be extended", extends.value()))));
 
         // 2. If the element interface for extends and the HTML namespace is HTMLUnknownElement
         //    (e.g., if extends does not indicate an element definition in this specification),
         //    then throw a "NotSupportedError" DOMException.
         if (DOM::is_unknown_html_element(extends.value()))
-            return JS::throw_completion(WebIDL::NotSupportedError::create(realm, MUST(String::formatted("'{}' is an unknown HTML element"sv, extends.value()))));
+            return JS::throw_completion(WebIDL::NotSupportedError::create(realm, MUST(String::formatted("'{}' is an unknown HTML element", extends.value()))));
 
         // 3. Set localName to extends.
         local_name = extends.value();
@@ -199,14 +199,15 @@ JS::ThrowCompletionOr<void> CustomElementRegistry::define(String const& name, We
         auto& prototype = prototype_value.as_object();
 
         // 3. Let lifecycleCallbacks be the ordered map «[ "connectedCallback" → null, "disconnectedCallback" → null, "adoptedCallback" → null,
-        //    "attributeChangedCallback" → null ]».
+        //    "connectedMoveCallback" → null, "attributeChangedCallback" → null ]».
         lifecycle_callbacks.set(CustomElementReactionNames::connectedCallback, {});
         lifecycle_callbacks.set(CustomElementReactionNames::disconnectedCallback, {});
         lifecycle_callbacks.set(CustomElementReactionNames::adoptedCallback, {});
+        lifecycle_callbacks.set(CustomElementReactionNames::connectedMoveCallback, {});
         lifecycle_callbacks.set(CustomElementReactionNames::attributeChangedCallback, {});
 
         // 4. For each callbackName of the keys of lifecycleCallbacks:
-        for (auto const& callback_name : { CustomElementReactionNames::connectedCallback, CustomElementReactionNames::disconnectedCallback, CustomElementReactionNames::adoptedCallback, CustomElementReactionNames::attributeChangedCallback }) {
+        for (auto const& callback_name : { CustomElementReactionNames::connectedCallback, CustomElementReactionNames::disconnectedCallback, CustomElementReactionNames::adoptedCallback, CustomElementReactionNames::connectedMoveCallback, CustomElementReactionNames::attributeChangedCallback }) {
             // 1. Let callbackValue be ? Get(prototype, callbackName).
             auto callback_value = TRY(prototype.get(callback_name));
 
@@ -362,7 +363,7 @@ WebIDL::ExceptionOr<GC::Ref<WebIDL::Promise>> CustomElementRegistry::when_define
 
     // 1. If name is not a valid custom element name, then return a promise rejected with a "SyntaxError" DOMException.
     if (!is_valid_custom_element_name(name))
-        return WebIDL::create_rejected_promise(realm, WebIDL::SyntaxError::create(realm, MUST(String::formatted("'{}' is not a valid custom element name"sv, name))));
+        return WebIDL::create_rejected_promise(realm, WebIDL::SyntaxError::create(realm, MUST(String::formatted("'{}' is not a valid custom element name", name))));
 
     // 2. If this's custom element definition set contains an item with name name, then return a promise resolved with that item's constructor.
     auto existing_definition_iterator = m_custom_element_definitions.find_if([&name](GC::Root<CustomElementDefinition> const& definition) {

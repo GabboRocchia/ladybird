@@ -448,7 +448,7 @@ GC::Ptr<DOM::Document> load_document(HTML::NavigationParams const& navigation_pa
         //        sourceSnapshotParams, and initiatorOrigin.
     }
 
-    // -> A supported image, video, or audio type
+    // -> a supported image, video, or audio type
     if (type.is_image()
         || type.is_audio_or_video()) {
         // Return the result of loading a media document given navigationParams and type.
@@ -473,9 +473,9 @@ GC::Ptr<DOM::Document> load_document(HTML::NavigationParams const& navigation_pa
 
     // FIXME: 4. Otherwise, the document's type is such that the resource will not affect navigationParams's navigable,
     //        e.g., because the resource is to be handed to an external application or because it is an unknown type
-    //        that will be processed as a download. Hand-off to external software given navigationParams's response,
-    //        navigationParams's navigable, navigationParams's final sandboxing flag set, sourceSnapshotParams's has
-    //        transient activation, and initiatorOrigin.
+    //        that will be processed by handle as a download. Hand-off to external software given navigationParams's
+    //        response, navigationParams's navigable, navigationParams's final sandboxing flag set,
+    //        sourceSnapshotParams's has transient activation, and initiatorOrigin.
 
     // 5. Return null.
     return nullptr;

@@ -26,11 +26,11 @@ class DisplayListPlayer {
 public:
     virtual ~DisplayListPlayer() = default;
 
-    void execute(DisplayList&);
-    void set_surface(NonnullRefPtr<Gfx::PaintingSurface> surface) { m_surface = surface; }
+    void execute(DisplayList&, ScrollStateSnapshot const&, RefPtr<Gfx::PaintingSurface>);
 
 protected:
-    Gfx::PaintingSurface& surface() const { return *m_surface; }
+    Gfx::PaintingSurface& surface() const { return m_surfaces.last(); }
+    void execute_impl(DisplayList&, ScrollStateSnapshot const& scroll_state, RefPtr<Gfx::PaintingSurface>);
 
 private:
     virtual void flush() = 0;
@@ -40,6 +40,7 @@ private:
     virtual void draw_scaled_immutable_bitmap(DrawScaledImmutableBitmap const&) = 0;
     virtual void draw_repeated_immutable_bitmap(DrawRepeatedImmutableBitmap const&) = 0;
     virtual void save(Save const&) = 0;
+    virtual void save_layer(SaveLayer const&) = 0;
     virtual void restore(Restore const&) = 0;
     virtual void translate(Translate const&) = 0;
     virtual void add_clip_rect(AddClipRect const&) = 0;
@@ -73,10 +74,10 @@ private:
     virtual void apply_mask_bitmap(ApplyMaskBitmap const&) = 0;
     virtual bool would_be_fully_clipped_by_painter(Gfx::IntRect) const = 0;
 
-    RefPtr<Gfx::PaintingSurface> m_surface;
+    Vector<NonnullRefPtr<Gfx::PaintingSurface>, 1> m_surfaces;
 };
 
-class DisplayList : public RefCounted<DisplayList> {
+class DisplayList : public AtomicRefCounted<DisplayList> {
 public:
     static NonnullRefPtr<DisplayList> create()
     {
@@ -92,9 +93,6 @@ public:
 
     AK::SegmentedVector<CommandListItem, 512> const& commands() const { return m_commands; }
 
-    void set_scroll_state(ScrollState scroll_state) { m_scroll_state = move(scroll_state); }
-    ScrollState const& scroll_state() const { return m_scroll_state; }
-
     void set_device_pixels_per_css_pixel(double device_pixels_per_css_pixel) { m_device_pixels_per_css_pixel = device_pixels_per_css_pixel; }
     double device_pixels_per_css_pixel() const { return m_device_pixels_per_css_pixel; }
 
@@ -102,7 +100,6 @@ private:
     DisplayList() = default;
 
     AK::SegmentedVector<CommandListItem, 512> m_commands;
-    ScrollState m_scroll_state;
     double m_device_pixels_per_css_pixel;
 };
 

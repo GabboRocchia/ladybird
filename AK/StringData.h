@@ -7,14 +7,17 @@
 #pragma once
 
 #include <AK/Error.h>
-#include <AK/FlyString.h>
 #include <AK/NonnullRefPtr.h>
 #include <AK/RefCounted.h>
-#include <AK/StringBase.h>
 #include <AK/StringBuilder.h>
-#include <AK/kmalloc.h>
 
 namespace AK::Detail {
+
+static constexpr size_t MAX_SHORT_STRING_BYTE_COUNT = sizeof(StringData*) - sizeof(u8);
+
+class StringData;
+
+void did_destroy_fly_string_data(Badge<StringData>, StringData const&);
 
 class StringData final : public RefCounted<StringData> {
 public:
@@ -27,7 +30,7 @@ public:
         if (!slot)
             return Error::from_errno(ENOMEM);
 
-        auto new_string_data = adopt_ref(*new (slot) StringData(byte_count, capacity));
+        auto new_string_data = adopt_ref(*new (slot) StringData(byte_count));
         buffer = const_cast<u8*>(new_string_data->bytes().data());
         return new_string_data;
     }
@@ -40,7 +43,7 @@ public:
         auto buffer = builder.leak_buffer_for_string_construction({});
         VERIFY(buffer.has_value()); // We should only arrive here if the buffer is outlined.
 
-        return adopt_ref(*new (buffer->buffer.data()) StringData(byte_count, buffer->capacity));
+        return adopt_ref(*new (buffer->buffer.data()) StringData(byte_count));
     }
 
     static ErrorOr<NonnullRefPtr<StringData>> create_substring(StringData const& superstring, size_t start, size_t byte_count)
@@ -53,7 +56,7 @@ public:
         if (!slot)
             return Error::from_errno(ENOMEM);
 
-        return adopt_ref(*new (slot) StringData(superstring, start, byte_count, capacity));
+        return adopt_ref(*new (slot) StringData(superstring, start, byte_count));
     }
 
     struct SubstringData {
@@ -63,7 +66,7 @@ public:
 
     void operator delete(void* ptr)
     {
-        kfree_sized(ptr, static_cast<StringData const*>(ptr)->m_capacity);
+        free(ptr);
     }
 
     ~StringData()
@@ -71,7 +74,7 @@ public:
         if (m_substring)
             substring_data().superstring->unref();
         if (m_is_fly_string)
-            FlyString::did_destroy_fly_string_data({}, *this);
+            Detail::did_destroy_fly_string_data({}, *this);
     }
 
     SubstringData const& substring_data() const
@@ -114,15 +117,13 @@ private:
         return sizeof(StringData) + (sizeof(char) * length);
     }
 
-    StringData(size_t byte_count, size_t capacity)
+    explicit StringData(size_t byte_count)
         : m_byte_count(byte_count)
-        , m_capacity(capacity)
     {
     }
 
-    StringData(StringData const& superstring, size_t start, size_t byte_count, size_t capacity)
+    StringData(StringData const& superstring, size_t start, size_t byte_count)
         : m_byte_count(byte_count)
-        , m_capacity(capacity)
         , m_substring(true)
     {
         auto& data = const_cast<SubstringData&>(substring_data());
@@ -142,7 +143,6 @@ private:
     }
 
     u32 m_byte_count { 0 };
-    u32 m_capacity { 0 };
 
     mutable unsigned m_hash { 0 };
     mutable bool m_has_hash { false };

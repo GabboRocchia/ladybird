@@ -70,6 +70,7 @@ set(SOURCES
     CSS/CSSImportRule.cpp
     CSS/CSSKeyframeRule.cpp
     CSS/CSSKeyframesRule.cpp
+    CSS/CSSFontFaceDescriptors.cpp
     CSS/CSSFontFaceRule.cpp
     CSS/CSSLayerBlockRule.cpp
     CSS/CSSLayerStatementRule.cpp
@@ -89,6 +90,7 @@ set(SOURCES
     CSS/CSSTransition.cpp
     CSS/CascadedProperties.cpp
     CSS/ComputedProperties.cpp
+    CSS/Descriptor.cpp
     CSS/Display.cpp
     CSS/EdgeRect.cpp
     CSS/Fetch.cpp
@@ -108,11 +110,13 @@ set(SOURCES
     CSS/MediaQueryListEvent.cpp
     CSS/Number.cpp
     CSS/Parser/ComponentValue.cpp
+    CSS/Parser/DescriptorParsing.cpp
     CSS/Parser/GradientParsing.cpp
     CSS/Parser/Helpers.cpp
     CSS/Parser/MediaParsing.cpp
     CSS/Parser/Parser.cpp
     CSS/Parser/PropertyParsing.cpp
+    CSS/Parser/RuleContext.cpp
     CSS/Parser/RuleParsing.cpp
     CSS/Parser/SelectorParsing.cpp
     CSS/Parser/Token.cpp
@@ -150,7 +154,8 @@ set(SOURCES
     CSS/StyleValues/ContentStyleValue.cpp
     CSS/StyleValues/CounterDefinitionsStyleValue.cpp
     CSS/StyleValues/CounterStyleValue.cpp
-    CSS/StyleValues/CSSColor.cpp
+    CSS/StyleValues/ColorFunctionStyleValue.cpp
+    CSS/StyleValues/ColorMixStyleValue.cpp
     CSS/StyleValues/CSSColorValue.cpp
     CSS/StyleValues/CSSHSL.cpp
     CSS/StyleValues/CSSHWB.cpp
@@ -164,6 +169,7 @@ set(SOURCES
     CSS/StyleValues/EasingStyleValue.cpp
     CSS/StyleValues/EdgeStyleValue.cpp
     CSS/StyleValues/FilterValueListStyleValue.cpp
+    CSS/StyleValues/FontSourceStyleValue.cpp
     CSS/StyleValues/GridAutoFlowStyleValue.cpp
     CSS/StyleValues/GridTemplateAreaStyleValue.cpp
     CSS/StyleValues/GridTrackPlacementStyleValue.cpp
@@ -183,6 +189,7 @@ set(SOURCES
     CSS/StyleValues/StyleValueList.cpp
     CSS/StyleValues/TransformationStyleValue.cpp
     CSS/StyleValues/TransitionStyleValue.cpp
+    CSS/StyleValues/UnicodeRangeStyleValue.cpp
     CSS/StyleValues/UnresolvedStyleValue.cpp
     CSS/Supports.cpp
     CSS/SyntaxHighlighter/SyntaxHighlighter.cpp
@@ -190,6 +197,7 @@ set(SOURCES
     CSS/Time.cpp
     CSS/Transformation.cpp
     CSS/TransitionEvent.cpp
+    CSS/URL.cpp
     CSS/VisualViewport.cpp
     Cookie/Cookie.cpp
     Cookie/ParsedCookie.cpp
@@ -214,6 +222,7 @@ set(SOURCES
     DOM/DocumentType.cpp
     DOM/EditingHostManager.cpp
     DOM/Element.cpp
+    DOM/ElementByIdMap.cpp
     DOM/ElementFactory.cpp
     DOM/Event.cpp
     DOM/EventDispatcher.cpp
@@ -312,6 +321,7 @@ set(SOURCES
     HTML/AudioTrack.cpp
     HTML/AudioTrackList.cpp
     HTML/AutocompleteElement.cpp
+    HTML/BarProp.cpp
     HTML/BeforeUnloadEvent.cpp
     HTML/BroadcastChannel.cpp
     HTML/BrowsingContext.cpp
@@ -325,6 +335,7 @@ set(SOURCES
     HTML/CloseEvent.cpp
     HTML/CloseWatcher.cpp
     HTML/CloseWatcherManager.cpp
+    HTML/CommandEvent.cpp
     HTML/CORSSettingAttribute.cpp
     HTML/CrossOrigin/AbstractOperations.cpp
     HTML/CrossOrigin/Reporting.cpp
@@ -481,6 +492,7 @@ set(SOURCES
     HTML/PotentialCORSRequest.cpp
     HTML/PromiseRejectionEvent.cpp
     HTML/RadioNodeList.cpp
+    HTML/RenderingThread.cpp
     HTML/Scripting/Agent.cpp
     HTML/Scripting/ClassicScript.cpp
     HTML/Scripting/Environments.cpp
@@ -492,9 +504,11 @@ set(SOURCES
     HTML/Scripting/ModuleMap.cpp
     HTML/Scripting/ModuleScript.cpp
     HTML/Scripting/Script.cpp
+    HTML/Scripting/SimilarOriginWindowAgent.cpp
     HTML/Scripting/SyntheticRealmSettings.cpp
     HTML/Scripting/TemporaryExecutionContext.cpp
     HTML/Scripting/WindowEnvironmentSettingsObject.cpp
+    HTML/Scripting/WorkerAgent.cpp
     HTML/Scripting/WorkerEnvironmentSettingsObject.cpp
     HTML/Scripting/SerializedEnvironmentSettingsObject.cpp
     HTML/SelectedFile.cpp
@@ -533,7 +547,7 @@ set(SOURCES
     HTML/WindowOrWorkerGlobalScope.cpp
     HTML/WindowProxy.cpp
     HTML/Worker.cpp
-    HTML/WorkerAgent.cpp
+    HTML/WorkerAgentParent.cpp
     HTML/WorkerDebugConsoleClient.cpp
     HTML/WorkerGlobalScope.cpp
     HTML/WorkerLocation.cpp
@@ -558,13 +572,14 @@ set(SOURCES
     IndexedDB/IDBVersionChangeEvent.cpp
     IndexedDB/Internal/Algorithms.cpp
     IndexedDB/Internal/Database.cpp
+    IndexedDB/Internal/Index.cpp
     IndexedDB/Internal/Key.cpp
+    IndexedDB/Internal/ObjectStore.cpp
     IndexedDB/Internal/RequestList.cpp
     Internals/InternalAnimationTimeline.cpp
     Internals/Internals.cpp
     Internals/InternalsBase.cpp
-    Internals/Processes.cpp
-    Internals/Settings.cpp
+    Internals/WebUI.cpp
     IntersectionObserver/IntersectionObserver.cpp
     IntersectionObserver/IntersectionObserverEntry.cpp
     Layout/AudioBox.cpp
@@ -681,6 +696,7 @@ set(SOURCES
     Painting/SVGPaintable.cpp
     Painting/SVGSVGPaintable.cpp
     Painting/ScrollFrame.cpp
+    Painting/ScrollState.cpp
     Painting/ShadowPainting.cpp
     Painting/StackingContext.cpp
     Painting/TableBordersPainting.cpp
@@ -711,6 +727,7 @@ set(SOURCES
     ResizeObserver/ResizeObserverSize.cpp
     ResourceTiming/PerformanceResourceTiming.cpp
     SecureContexts/AbstractOperations.cpp
+    ServiceWorker/EventNames.cpp
     ServiceWorker/Job.cpp
     ServiceWorker/Registration.cpp
     ServiceWorker/ServiceWorker.cpp
@@ -732,19 +749,25 @@ set(SOURCES
     Streams/GenericTransformStream.cpp
     Streams/ReadableByteStreamController.cpp
     Streams/ReadableStream.cpp
+    Streams/ReadableStreamAsyncIterator.cpp
     Streams/ReadableStreamBYOBReader.cpp
     Streams/ReadableStreamBYOBRequest.cpp
     Streams/ReadableStreamDefaultController.cpp
     Streams/ReadableStreamDefaultReader.cpp
     Streams/ReadableStreamGenericReader.cpp
+    Streams/ReadableStreamOperations.cpp
+    Streams/ReadableStreamPipeTo.cpp
+    Streams/ReadableStreamTee.cpp
     Streams/Transformer.cpp
     Streams/TransformStream.cpp
     Streams/TransformStreamDefaultController.cpp
+    Streams/TransformStreamOperations.cpp
     Streams/UnderlyingSink.cpp
     Streams/UnderlyingSource.cpp
     Streams/WritableStream.cpp
     Streams/WritableStreamDefaultController.cpp
     Streams/WritableStreamDefaultWriter.cpp
+    Streams/WritableStreamOperations.cpp
     SVG/AttributeNames.cpp
     SVG/AttributeParser.cpp
     SVG/SVGAElement.cpp
@@ -856,6 +879,7 @@ set(SOURCES
     WebDriver/TimeoutsConfiguration.cpp
     WebDriver/UserPrompt.cpp
     WebGL/Extensions/ANGLEInstancedArrays.cpp
+    WebGL/Extensions/EXTBlendMinMax.cpp
     WebGL/Extensions/EXTColorBufferFloat.cpp
     WebGL/Extensions/OESVertexArrayObject.cpp
     WebGL/Extensions/WebGLCompressedTextureS3tc.cpp
@@ -883,6 +907,7 @@ set(SOURCES
     WebGL/WebGLUniformLocation.cpp
     WebGL/WebGLVertexArrayObject.cpp
     WebIDL/AbstractOperations.cpp
+    WebIDL/AsyncIterator.cpp
     WebIDL/Buffers.cpp
     WebIDL/CallbackType.cpp
     WebIDL/DOMException.cpp
@@ -948,6 +973,7 @@ invoke_generator(
 set(GENERATED_SOURCES
     ARIA/AriaRoles.cpp
     CSS/DefaultStyleSheetSource.cpp
+    CSS/DescriptorID.cpp
     CSS/Enums.cpp
     CSS/GeneratedCSSStyleProperties.cpp
     CSS/GeneratedCSSStyleProperties.idl
@@ -970,7 +996,7 @@ set(GENERATED_SOURCES
 
 serenity_lib(LibWeb web)
 
-target_link_libraries(LibWeb PRIVATE LibCore LibCompress LibCrypto LibJS LibHTTP LibGfx LibIPC LibRegex LibSyntax LibTextCodec LibUnicode LibMedia LibWasm LibXML LibIDL LibURL LibTLS LibRequests LibGC skia)
+target_link_libraries(LibWeb PRIVATE LibCore LibCompress LibCrypto LibJS LibHTTP LibGfx LibIPC LibRegex LibSyntax LibTextCodec LibUnicode LibMedia LibWasm LibXML LibIDL LibURL LibTLS LibRequests LibGC LibThreading skia)
 
 if (APPLE)
     target_link_libraries(LibWeb PRIVATE unofficial::angle::libEGL unofficial::angle::libGLESv2)
@@ -995,7 +1021,8 @@ if (ENABLE_SWIFT)
         HTML/Parser/HTMLToken.swift
         HTML/Parser/HTMLTokenizer.swift
         HTML/Parser/HTMLTokenizerHelpers.cpp
+        HTML/Parser/SpeculativeHTMLParser.swift
     )
     target_link_libraries(LibWeb PRIVATE AK Collections)
-    add_swift_target_properties(LibWeb LAGOM_LIBRARIES AK LibGfx)
+    add_swift_target_properties(LibWeb LAGOM_LIBRARIES AK LibGfx LibGC)
 endif()

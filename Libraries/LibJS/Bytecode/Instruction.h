@@ -51,12 +51,12 @@
     O(EnterObjectEnvironment)          \
     O(EnterUnwindContext)              \
     O(Exp)                             \
-    O(GetArgument)                     \
     O(GetById)                         \
     O(GetByIdWithThis)                 \
     O(GetByValue)                      \
     O(GetByValueWithThis)              \
     O(GetCalleeAndThisFromEnvironment) \
+    O(GetCompletionFields)             \
     O(GetGlobal)                       \
     O(GetImportMeta)                   \
     O(GetIterator)                     \
@@ -130,7 +130,7 @@
     O(Return)                          \
     O(RightShift)                      \
     O(ScheduleJump)                    \
-    O(SetArgument)                     \
+    O(SetCompletionType)               \
     O(SetLexicalBinding)               \
     O(SetVariableBinding)              \
     O(StrictlyEquals)                  \
@@ -203,7 +203,6 @@ public:
     }
 
     UnrealizedSourceRange source_range() const;
-    RefPtr<SourceCode> source_code() const;
 
     Executable const* executable() const { return m_executable; }
 

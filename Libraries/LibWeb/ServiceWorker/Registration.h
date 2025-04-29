@@ -41,6 +41,7 @@ public:
     StorageAPI::StorageKey const& storage_key() const { return m_storage_key; }
     URL::URL const& scope_url() const { return m_scope_url; }
     Bindings::ServiceWorkerUpdateViaCache update_via_cache() const { return m_update_via_cache_mode; }
+    void set_update_via_cache(Bindings::ServiceWorkerUpdateViaCache update_via_cache_mode) { m_update_via_cache_mode = update_via_cache_mode; }
 
     void set_last_update_check_time(MonotonicTime time) { m_last_update_check_time = time; }
 
@@ -68,8 +69,9 @@ private:
     // FIXME: Spec bug: A service worker registration has an associated NavigationPreloadManager object.
     //        This can't possibly be true. The association is the other way around.
 
-    bool m_navigation_preload_enabled = { false }; // https://w3c.github.io/ServiceWorker/#service-worker-registration-navigation-preload-enabled-flag
-    ByteString m_navigation_preload_header_value;  // https://w3c.github.io/ServiceWorker/#service-worker-registration-navigation-preload-header-value
+    // FIXME: Investigate if this is implemented.
+    [[maybe_unused]] bool m_navigation_preload_enabled = { false }; // https://w3c.github.io/ServiceWorker/#service-worker-registration-navigation-preload-enabled-flag
+    ByteString m_navigation_preload_header_value;                   // https://w3c.github.io/ServiceWorker/#service-worker-registration-navigation-preload-header-value
 };
 
 struct RegistrationKey {

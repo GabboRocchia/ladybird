@@ -81,7 +81,8 @@ ThrowCompletionOr<Promise*> SyntheticModule::evaluate(VM& vm)
     // NOTE: Done by the push on step 8.
 
     // 2. Let moduleContext be a new ECMAScript code execution context.
-    auto module_context = ExecutionContext::create();
+    ExecutionContext* module_context = nullptr;
+    ALLOCATE_EXECUTION_CONTEXT_ON_NATIVE_STACK(module_context, 0, 0);
 
     // 3. Set the Function of moduleContext to null.
     // Note: This is the default value.
@@ -113,8 +114,7 @@ ThrowCompletionOr<Promise*> SyntheticModule::evaluate(VM& vm)
     // Note: Because we expect it to return a promise we convert this here.
     auto promise = Promise::create(realm());
     if (result.is_error()) {
-        VERIFY(result.throw_completion().value().has_value());
-        promise->reject(*result.throw_completion().value());
+        promise->reject(result.throw_completion().value());
     } else {
         // Note: This value probably isn't visible to JS code? But undefined is fine anyway.
         promise->fulfill(js_undefined());

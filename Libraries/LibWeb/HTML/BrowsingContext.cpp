@@ -184,7 +184,7 @@ WebIDL::ExceptionOr<BrowsingContext::BrowsingContextAndDocument> BrowsingContext
         });
 
     // 11. Let topLevelCreationURL be about:blank if embedder is null; otherwise embedder's relevant settings object's top-level creation URL.
-    auto top_level_creation_url = !embedder ? URL::about_blank() : relevant_settings_object(*embedder).top_level_creation_url;
+    auto top_level_creation_url = !embedder ? URL::about_blank() : relevant_settings_object(*embedder).top_level_creation_url.value();
 
     // 12. Let topLevelOrigin be origin if embedder is null; otherwise embedder's relevant settings object's top-level origin.
     auto top_level_origin = !embedder ? origin : relevant_settings_object(*embedder).origin();
@@ -251,7 +251,7 @@ WebIDL::ExceptionOr<BrowsingContext::BrowsingContextAndDocument> BrowsingContext
         document->set_referrer(creator->url().serialize());
 
         // 2. Set document's policy container to a clone of creator's policy container.
-        document->set_policy_container(creator->policy_container()->clone(document->realm()));
+        document->set_policy_container(creator->policy_container()->clone(document->heap()));
 
         // 3. If creator's origin is same origin with creator's relevant settings object's top-level origin,
         if (creator->origin().is_same_origin(creator->relevant_settings_object().top_level_origin)) {

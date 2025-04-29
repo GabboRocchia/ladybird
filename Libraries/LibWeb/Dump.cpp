@@ -125,16 +125,19 @@ void dump_tree(StringBuilder& builder, DOM::Node const& node)
             }
         }
     }
+    if (is<HTML::HTMLTemplateElement>(node)) {
+        auto& template_element = as<HTML::HTMLTemplateElement>(node);
+        for (int i = 0; i < indent; ++i)
+            builder.append("  "sv);
+        builder.append("(template content)\n"sv);
+        dump_tree(builder, template_element.content());
+        builder.append("(template normal subtree)\n"sv);
+    }
     if (is<DOM::ParentNode>(node)) {
-        if (!is<HTML::HTMLTemplateElement>(node)) {
-            static_cast<DOM::ParentNode const&>(node).for_each_child([&](auto& child) {
-                dump_tree(builder, child);
-                return IterationDecision::Continue;
-            });
-        } else {
-            auto& template_element = as<HTML::HTMLTemplateElement>(node);
-            dump_tree(builder, template_element.content());
-        }
+        static_cast<DOM::ParentNode const&>(node).for_each_child([&](auto& child) {
+            dump_tree(builder, child);
+            return IterationDecision::Continue;
+        });
     }
     --indent;
 }
@@ -701,7 +704,10 @@ void dump_rule(StringBuilder& builder, CSS::CSSRule const& rule, int indent_leve
 
 void dump_font_face_rule(StringBuilder& builder, CSS::CSSFontFaceRule const& rule, int indent_levels)
 {
-    auto& font_face = rule.font_face();
+    auto const font_face = rule.font_face();
+    indent(builder, indent_levels + 1);
+    builder.appendff("VALID: {}\n", rule.is_valid());
+
     indent(builder, indent_levels + 1);
     builder.appendff("font-family: {}\n", font_face.font_family());
 
@@ -787,7 +793,7 @@ void dump_font_face_rule(StringBuilder& builder, CSS::CSSFontFaceRule const& rul
 void dump_import_rule(StringBuilder& builder, CSS::CSSImportRule const& rule, int indent_levels)
 {
     indent(builder, indent_levels);
-    builder.appendff("  Document URL: {}\n", rule.url());
+    builder.appendff("  Document URL: {}\n", rule.url().to_string());
 }
 
 void dump_layer_block_rule(StringBuilder& builder, CSS::CSSLayerBlockRule const& layer_block, int indent_levels)

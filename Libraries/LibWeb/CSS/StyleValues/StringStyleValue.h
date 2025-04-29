@@ -8,12 +8,13 @@
 
 #include <AK/FlyString.h>
 #include <LibWeb/CSS/CSSStyleValue.h>
+#include <LibWeb/CSS/Serialize.h>
 
 namespace Web::CSS {
 
 class StringStyleValue : public StyleValueWithDefaultOperators<StringStyleValue> {
 public:
-    static ValueComparingNonnullRefPtr<StringStyleValue> create(FlyString const& string)
+    static ValueComparingNonnullRefPtr<StringStyleValue const> create(FlyString const& string)
     {
         return adopt_ref(*new (nothrow) StringStyleValue(string));
     }

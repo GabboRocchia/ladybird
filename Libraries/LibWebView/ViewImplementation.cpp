@@ -252,25 +252,6 @@ void ViewImplementation::set_preferred_motion(Web::CSS::PreferredMotion motion)
     client().async_set_preferred_motion(page_id(), motion);
 }
 
-void ViewImplementation::set_preferred_languages(ReadonlySpan<String> preferred_languages)
-{
-    client().async_set_preferred_languages(page_id(), preferred_languages);
-}
-
-void ViewImplementation::set_enable_do_not_track(bool enable)
-{
-    client().async_set_enable_do_not_track(page_id(), enable);
-}
-
-void ViewImplementation::set_enable_autoplay(bool enable)
-{
-    if (enable) {
-        client().async_set_autoplay_allowed_on_all_websites(page_id());
-    } else {
-        client().async_set_autoplay_allowlist(page_id(), {});
-    }
-}
-
 ByteString ViewImplementation::selected_text()
 {
     return client().get_selected_text(page_id());
@@ -612,6 +593,10 @@ void ViewImplementation::initialize_client(CreateNewClient create_new_client)
 
     if (auto const& user_agent_preset = Application::web_content_options().user_agent_preset; user_agent_preset.has_value())
         client().async_debug_request(m_client_state.page_index, "spoof-user-agent"sv, *user_agents.get(*user_agent_preset));
+
+    languages_changed();
+    autoplay_settings_changed();
+    do_not_track_changed();
 }
 
 void ViewImplementation::handle_web_content_process_crash(LoadErrorPage load_error_page)
@@ -638,19 +623,48 @@ void ViewImplementation::handle_web_content_process_crash(LoadErrorPage load_err
 
     if (load_error_page == LoadErrorPage::Yes) {
         StringBuilder builder;
-        builder.append("<html><head><title>Crashed: "sv);
-        builder.append(escape_html_entities(m_url.to_byte_string()));
-        builder.append("</title></head><body>"sv);
-        builder.append("<h1>Web page crashed"sv);
-        if (m_url.host().has_value()) {
-            builder.appendff(" on {}", escape_html_entities(m_url.serialized_host()));
-        }
-        builder.append("</h1>"sv);
+        builder.append("<!DOCTYPE html>"sv);
+        builder.append("<html lang=\"en\"><head><meta charset=\"UTF-8\"><title>Error!</title><style>"
+                       ":root { color-scheme: light dark; font-family: system-ui, sans-serif; }"
+                       "body { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 1rem; text-align: center; }"
+                       "header { display: flex; flex-direction: column; align-items: center; gap: 2rem; margin-bottom: 1rem; }"
+                       "svg { height: 64px; width: auto; stroke: currentColor; fill: none; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }"
+                       "h1 { margin: 0; font-size: 1.5rem; }"
+                       "p { font-size: 1rem; color: #555; }"
+                       "</style></head><body>"sv);
+        builder.append("<header>"sv);
+        builder.append("<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 17.5 21.5\">"sv);
+        builder.append("<path class=\"b\" d=\"M11.75.75h-9c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-13l-5-5z\"/>"sv);
+        builder.append("<path class=\"b\" d=\"M10.75.75v4c0 1.1.9 2 2 2h4M4.75 9.75l2 2M10.75 9.75l2 2M12.75 9.75l-2 2M6.75 9.75l-2 2M5.75 16.75c1-2.67 5-2.67 6 0\"/></svg>"sv);
         auto escaped_url = escape_html_entities(m_url.to_byte_string());
-        builder.appendff("The web page <a href=\"{}\">{}</a> has crashed.<br><br>You can reload the page to try again.", escaped_url, escaped_url);
+        builder.append("<h1>Ladybird flew off-course!</h1>"sv);
+        builder.appendff("<p>The web page <a href=\"{}\">{}</a> has crashed.<br><br>You can reload the page to try again.</p>", escaped_url, escaped_url);
         builder.append("</body></html>"sv);
         load_html(builder.to_byte_string());
     }
+}
+
+void ViewImplementation::languages_changed()
+{
+    auto const& languages = Application::settings().languages();
+    client().async_set_preferred_languages(page_id(), languages);
+}
+
+void ViewImplementation::autoplay_settings_changed()
+{
+    auto const& autoplay_settings = Application::settings().autoplay_settings();
+    auto const& web_content_options = Application::web_content_options();
+
+    if (autoplay_settings.enabled_globally || web_content_options.enable_autoplay == EnableAutoplay::Yes)
+        client().async_set_autoplay_allowed_on_all_websites(page_id());
+    else
+        client().async_set_autoplay_allowlist(page_id(), autoplay_settings.site_filters.values());
+}
+
+void ViewImplementation::do_not_track_changed()
+{
+    auto do_not_track = Application::settings().do_not_track();
+    client().async_set_enable_do_not_track(page_id(), do_not_track == DoNotTrack::Yes);
 }
 
 static ErrorOr<LexicalPath> save_screenshot(Gfx::ShareableBitmap const& bitmap)
@@ -674,7 +688,7 @@ NonnullRefPtr<Core::Promise<LexicalPath>> ViewImplementation::take_screenshot(Sc
     auto promise = Core::Promise<LexicalPath>::construct();
 
     if (m_pending_screenshot) {
-        // For simplicitly, only allow taking one screenshot at a time for now. Revisit if we need
+        // For simplicity, only allow taking one screenshot at a time for now. Revisit if we need
         // to allow spamming screenshot requests for some reason.
         promise->reject(Error::from_string_literal("A screenshot request is already in progress"));
         return promise;
@@ -706,7 +720,7 @@ NonnullRefPtr<Core::Promise<LexicalPath>> ViewImplementation::take_dom_node_scre
     auto promise = Core::Promise<LexicalPath>::construct();
 
     if (m_pending_screenshot) {
-        // For simplicitly, only allow taking one screenshot at a time for now. Revisit if we need
+        // For simplicity, only allow taking one screenshot at a time for now. Revisit if we need
         // to allow spamming screenshot requests for some reason.
         promise->reject(Error::from_string_literal("A screenshot request is already in progress"));
         return promise;
@@ -735,7 +749,7 @@ NonnullRefPtr<Core::Promise<String>> ViewImplementation::request_internal_page_i
     auto promise = Core::Promise<String>::construct();
 
     if (m_pending_info_request) {
-        // For simplicitly, only allow one info request at a time for now.
+        // For simplicity, only allow one info request at a time for now.
         promise->reject(Error::from_string_literal("A page info request is already in progress"));
         return promise;
     }

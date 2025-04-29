@@ -68,11 +68,15 @@ static inline bool matches_lang_pseudo_class(DOM::Element const& element, Vector
             continue;
         if (language == "*"sv)
             return true;
-        if (!element_language.contains('-') && Infra::is_ascii_case_insensitive_match(element_language, language))
-            return true;
-        auto parts = element_language.split_limit('-', 2).release_value_but_fixme_should_propagate_errors();
-        if (!parts.is_empty() && Infra::is_ascii_case_insensitive_match(parts[0], language))
-            return true;
+        auto element_language_length = element_language.bytes_as_string_view().length();
+        auto language_length = language.bytes_as_string_view().length();
+        if (element_language_length == language_length) {
+            if (Infra::is_ascii_case_insensitive_match(element_language, language))
+                return true;
+        } else if (element_language_length > language_length) {
+            if (element_language.starts_with_bytes(language, CaseSensitivity::CaseInsensitive) && element_language.bytes_as_string_view()[language_length] == '-')
+                return true;
+        }
     }
     return false;
 }
@@ -291,6 +295,10 @@ static inline bool matches_attribute(CSS::Selector::SimpleSelector::Attribute co
         return !attribute.value.is_empty()
             && attr->value().contains(attribute.value, case_sensitivity);
     case CSS::Selector::SimpleSelector::Attribute::MatchType::StartsWithSegment: {
+        // https://www.w3.org/TR/CSS2/selector.html#attribute-selectors
+        // [att|=val]
+        // Represents an element with the att attribute, its value either being exactly "val" or beginning with "val" immediately followed by "-" (U+002D).
+
         auto const& element_attr_value = attr->value();
         if (element_attr_value.is_empty()) {
             // If the attribute value on element is empty, the selector is true
@@ -300,10 +308,19 @@ static inline bool matches_attribute(CSS::Selector::SimpleSelector::Attribute co
         if (attribute.value.is_empty()) {
             return false;
         }
-        auto segments = element_attr_value.bytes_as_string_view().split_view('-');
-        return case_insensitive_match
-            ? Infra::is_ascii_case_insensitive_match(segments.first(), attribute.value)
-            : segments.first() == attribute.value;
+
+        auto element_attribute_length = element_attr_value.bytes_as_string_view().length();
+        auto attribute_length = attribute.value.bytes_as_string_view().length();
+        if (element_attribute_length < attribute_length)
+            return false;
+
+        if (attribute_length == element_attribute_length) {
+            return case_insensitive_match
+                ? Infra::is_ascii_case_insensitive_match(element_attr_value, attribute.value)
+                : element_attr_value == attribute.value;
+        }
+
+        return element_attr_value.starts_with_bytes(attribute.value, case_insensitive_match ? CaseSensitivity::CaseInsensitive : CaseSensitivity::CaseSensitive) && element_attr_value.bytes_as_string_view()[attribute_length] == '-';
     }
     case CSS::Selector::SimpleSelector::Attribute::MatchType::StartsWithString:
         return !attribute.value.is_empty()
@@ -433,7 +450,10 @@ static bool matches_optimal_value_pseudo_class(DOM::Element const& element, HTML
 
 static inline bool matches_pseudo_class(CSS::Selector::SimpleSelector::PseudoClassSelector const& pseudo_class, DOM::Element const& element, GC::Ptr<DOM::Element const> shadow_host, MatchContext& context, GC::Ptr<DOM::ParentNode const> scope, SelectorKind selector_kind)
 {
+    context.attempted_pseudo_class_matches.set(pseudo_class.type, true);
     switch (pseudo_class.type) {
+    case CSS::PseudoClass::__Count:
+        VERIFY_NOT_REACHED();
     case CSS::PseudoClass::Link:
     case CSS::PseudoClass::AnyLink:
         // NOTE: AnyLink should match whether the link is visited or not, so if we ever start matching
@@ -448,7 +468,6 @@ static inline bool matches_pseudo_class(CSS::Selector::SimpleSelector::PseudoCla
     case CSS::PseudoClass::Active:
         return element.is_active();
     case CSS::PseudoClass::Hover:
-        context.did_match_any_hover_rules = true;
         return matches_hover_pseudo_class(element);
     case CSS::PseudoClass::Focus:
         return element.is_focused();
@@ -586,6 +605,8 @@ static inline bool matches_pseudo_class(CSS::Selector::SimpleSelector::PseudoCla
 
         int index = 1;
         switch (pseudo_class.type) {
+        case CSS::PseudoClass::__Count:
+            VERIFY_NOT_REACHED();
         case CSS::PseudoClass::NthChild: {
             if (!matches_selector_list(pseudo_class.argument_selector_list, element))
                 return false;

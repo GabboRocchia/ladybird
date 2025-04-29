@@ -9,12 +9,12 @@
 #include <AK/Vector.h>
 #include <LibWeb/HTML/Navigable.h>
 #include <LibWeb/HTML/NavigationType.h>
+#include <LibWeb/HTML/RenderingThread.h>
 #include <LibWeb/HTML/SessionHistoryTraversalQueue.h>
 #include <LibWeb/HTML/VisibilityState.h>
 #include <LibWeb/Page/Page.h>
 #include <LibWeb/Painting/DisplayListPlayerSkia.h>
 #include <LibWeb/StorageAPI/StorageShed.h>
-#include <WebContent/BackingStoreManager.h>
 
 #ifdef AK_OS_MACOS
 #    include <LibGfx/MetalContext.h>
@@ -97,7 +97,8 @@ public:
 
     [[nodiscard]] GC::Ptr<DOM::Node> currently_focused_area();
 
-    void paint(Web::DevicePixelRect const&, Painting::BackingStore&, Web::PaintOptions);
+    RefPtr<Painting::DisplayList> record_display_list(DevicePixelRect const&, PaintOptions);
+    void start_display_list_rendering(NonnullRefPtr<Painting::DisplayList>, NonnullRefPtr<Painting::BackingStore>, Function<void()>&& callback);
 
     enum class CheckIfUnloadingIsCanceledResult {
         CanceledByBeforeUnload,
@@ -119,6 +120,8 @@ public:
 private:
     TraversableNavigable(GC::Ref<Page>);
 
+    virtual bool is_traversable() const override { return true; }
+
     virtual void visit_edges(Cell::Visitor&) override;
 
     // FIXME: Fix spec typo cancelation --> cancellation
@@ -137,7 +140,7 @@ private:
 
     [[nodiscard]] bool can_go_forward() const;
 
-    NonnullRefPtr<Gfx::PaintingSurface> painting_surface_for_backing_store(Painting::BackingStore&);
+    RenderingThread m_rendering_thread;
 
     // https://html.spec.whatwg.org/multipage/document-sequences.html#tn-current-session-history-step
     int m_current_session_history_step { 0 };
@@ -162,8 +165,6 @@ private:
     String m_window_handle;
 
     RefPtr<Gfx::SkiaBackendContext> m_skia_backend_context;
-    OwnPtr<Painting::DisplayListPlayerSkia> m_skia_player;
-    HashMap<Gfx::Bitmap*, NonnullRefPtr<Gfx::PaintingSurface>> m_bitmap_to_surface;
 
     bool m_needs_repaint { true };
 };
@@ -175,5 +176,8 @@ struct BrowsingContextAndDocument {
 
 WebIDL::ExceptionOr<BrowsingContextAndDocument> create_a_new_top_level_browsing_context_and_document(GC::Ref<Page> page);
 void finalize_a_same_document_navigation(GC::Ref<TraversableNavigable> traversable, GC::Ref<Navigable> target_navigable, GC::Ref<SessionHistoryEntry> target_entry, GC::Ptr<SessionHistoryEntry> entry_to_replace, HistoryHandlingBehavior, UserNavigationInvolvement);
+
+template<>
+inline bool Navigable::fast_is<TraversableNavigable>() const { return is_traversable(); }
 
 }

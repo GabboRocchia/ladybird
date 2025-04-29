@@ -95,9 +95,9 @@ public:
 
     [[nodiscard]] u16 tag() const { return m_value.tag; }
 
-    bool is_empty() const { return m_value.tag == EMPTY_TAG; }
-    bool is_undefined() const { return m_value.tag == UNDEFINED_TAG; }
-    bool is_null() const { return m_value.tag == NULL_TAG; }
+    bool is_special_empty_value() const { return m_value.encoded == (EMPTY_TAG << GC::TAG_SHIFT); }
+    bool is_undefined() const { return m_value.encoded == (UNDEFINED_TAG << GC::TAG_SHIFT); }
+    bool is_null() const { return m_value.encoded == (NULL_TAG << GC::TAG_SHIFT); }
     bool is_number() const { return is_double() || is_int32(); }
     bool is_string() const { return m_value.tag == STRING_TAG; }
     bool is_object() const { return m_value.tag == OBJECT_TAG; }
@@ -154,8 +154,8 @@ public:
         return !is_nan() && !is_infinity();
     }
 
-    Value()
-        : Value(EMPTY_TAG << GC::TAG_SHIFT, (u64)0)
+    constexpr Value()
+        : Value(UNDEFINED_TAG << GC::TAG_SHIFT, (u64)0)
     {
     }
 
@@ -379,13 +379,6 @@ public:
 
     [[nodiscard]] String to_string_without_side_effects() const;
 
-    Value value_or(Value fallback) const
-    {
-        if (is_empty())
-            return fallback;
-        return *this;
-    }
-
     [[nodiscard]] GC::Ref<PrimitiveString> typeof_(VM&) const;
 
     bool operator==(Value const&) const;
@@ -424,7 +417,14 @@ private:
     ThrowCompletionOr<Value> to_numeric_slow_case(VM&) const;
     ThrowCompletionOr<Value> to_primitive_slow_case(VM&, PreferredType) const;
 
-    Value(u64 tag, u64 val)
+    enum class EmptyTag { Empty };
+
+    constexpr Value(EmptyTag)
+        : Value(EMPTY_TAG << GC::TAG_SHIFT, (u64)0)
+    {
+    }
+
+    constexpr Value(u64 tag, u64 val)
     {
         ASSERT(!(tag & val));
         m_value.encoded = tag | val;
@@ -458,8 +458,9 @@ private:
 
     ThrowCompletionOr<i32> to_i32_slow_case(VM&) const;
 
-    friend Value js_undefined();
-    friend Value js_null();
+    friend constexpr Value js_undefined();
+    friend constexpr Value js_null();
+    friend constexpr Value js_special_empty_value();
     friend ThrowCompletionOr<Value> greater_than(VM&, Value lhs, Value rhs);
     friend ThrowCompletionOr<Value> greater_than_equals(VM&, Value lhs, Value rhs);
     friend ThrowCompletionOr<Value> less_than(VM&, Value lhs, Value rhs);
@@ -468,14 +469,19 @@ private:
     friend bool same_value_non_number(Value lhs, Value rhs);
 };
 
-inline Value js_undefined()
+inline constexpr Value js_undefined()
 {
     return Value(UNDEFINED_TAG << GC::TAG_SHIFT, (u64)0);
 }
 
-inline Value js_null()
+inline constexpr Value js_null()
 {
     return Value(NULL_TAG << GC::TAG_SHIFT, (u64)0);
+}
+
+inline constexpr Value js_special_empty_value()
+{
+    return Value(Value::EmptyTag::Empty);
 }
 
 inline Value js_nan()
@@ -549,38 +555,38 @@ class Optional<JS::Value> : public OptionalBase<JS::Value> {
 public:
     using ValueType = JS::Value;
 
-    Optional() = default;
+    constexpr Optional() = default;
 
     template<SameAs<OptionalNone> V>
-    Optional(V) { }
+    constexpr Optional(V) { }
 
-    Optional(Optional<JS::Value> const& other)
+    constexpr Optional(Optional<JS::Value> const& other)
     {
         if (other.has_value())
             m_value = other.m_value;
     }
 
-    Optional(Optional&& other)
+    constexpr Optional(Optional&& other)
         : m_value(other.m_value)
     {
     }
 
     template<typename U = JS::Value>
     requires(!IsSame<OptionalNone, RemoveCVReference<U>>)
-    explicit(!IsConvertible<U&&, JS::Value>) Optional(U&& value)
+    explicit(!IsConvertible<U&&, JS::Value>) constexpr Optional(U&& value)
     requires(!IsSame<RemoveCVReference<U>, Optional<JS::Value>> && IsConstructible<JS::Value, U &&>)
         : m_value(forward<U>(value))
     {
     }
 
     template<SameAs<OptionalNone> V>
-    Optional& operator=(V)
+    constexpr Optional& operator=(V)
     {
         clear();
         return *this;
     }
 
-    Optional& operator=(Optional const& other)
+    constexpr Optional& operator=(Optional const& other)
     {
         if (this != &other) {
             clear();
@@ -589,7 +595,7 @@ public:
         return *this;
     }
 
-    Optional& operator=(Optional&& other)
+    constexpr Optional& operator=(Optional&& other)
     {
         if (this != &other) {
             clear();
@@ -598,34 +604,34 @@ public:
         return *this;
     }
 
-    void clear()
+    constexpr void clear()
     {
-        m_value = {};
+        m_value = JS::js_special_empty_value();
     }
 
-    [[nodiscard]] bool has_value() const
+    [[nodiscard]] constexpr bool has_value() const
     {
-        return !m_value.is_empty();
+        return !m_value.is_special_empty_value();
     }
 
-    [[nodiscard]] JS::Value& value() &
-    {
-        VERIFY(has_value());
-        return m_value;
-    }
-
-    [[nodiscard]] JS::Value const& value() const&
+    [[nodiscard]] constexpr JS::Value& value() &
     {
         VERIFY(has_value());
         return m_value;
     }
 
-    [[nodiscard]] JS::Value value() &&
+    [[nodiscard]] constexpr JS::Value const& value() const&
+    {
+        VERIFY(has_value());
+        return m_value;
+    }
+
+    [[nodiscard]] constexpr JS::Value value() &&
     {
         return release_value();
     }
 
-    [[nodiscard]] JS::Value release_value()
+    [[nodiscard]] constexpr JS::Value release_value()
     {
         VERIFY(has_value());
         JS::Value released_value = m_value;
@@ -634,7 +640,7 @@ public:
     }
 
 private:
-    JS::Value m_value;
+    JS::Value m_value { JS::js_special_empty_value() };
 };
 
 }
@@ -690,7 +696,7 @@ template<>
 struct Formatter<JS::Value> : Formatter<StringView> {
     ErrorOr<void> format(FormatBuilder& builder, JS::Value value)
     {
-        if (value.is_empty())
+        if (value.is_special_empty_value())
             return Formatter<StringView>::format(builder, "<empty>"sv);
         return Formatter<StringView>::format(builder, value.to_string_without_side_effects());
     }

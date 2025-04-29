@@ -77,16 +77,15 @@ CSSStyleProperties::CSSStyleProperties(JS::Realm& realm, Computed computed, Read
 
 void CSSStyleProperties::initialize(JS::Realm& realm)
 {
-    Base::initialize(realm);
     WEB_SET_PROTOTYPE_FOR_INTERFACE(CSSStyleProperties);
+    Base::initialize(realm);
 }
 
 void CSSStyleProperties::visit_edges(Visitor& visitor)
 {
     Base::visit_edges(visitor);
     for (auto& property : m_properties) {
-        if (property.value->is_image())
-            property.value->as_image().visit_edges(visitor);
+        property.value->visit_edges(visitor);
     }
 }
 
@@ -271,8 +270,12 @@ WebIDL::ExceptionOr<void> CSSStyleProperties::set_property(StringView property_n
     }
 
     // 10. If updated is true, update style attribute for the CSS declaration block.
-    if (updated)
+    if (updated) {
         update_style_attribute();
+
+        // Non-standard: Invalidate style for the owners of our containing sheet, if any.
+        invalidate_owners(DOM::StyleInvalidationReason::CSSStylePropertiesSetProperty);
+    }
 
     return {};
 }
@@ -429,10 +432,10 @@ static Optional<StyleProperty> style_property_for_sided_shorthand(PropertyID pro
     if (top->important != right->important || top->important != bottom->important || top->important != left->important)
         return {};
 
-    ValueComparingNonnullRefPtr<CSSStyleValue> const top_value { top->value };
-    ValueComparingNonnullRefPtr<CSSStyleValue> const right_value { right->value };
-    ValueComparingNonnullRefPtr<CSSStyleValue> const bottom_value { bottom->value };
-    ValueComparingNonnullRefPtr<CSSStyleValue> const left_value { left->value };
+    ValueComparingNonnullRefPtr<CSSStyleValue const> const top_value { top->value };
+    ValueComparingNonnullRefPtr<CSSStyleValue const> const right_value { right->value };
+    ValueComparingNonnullRefPtr<CSSStyleValue const> const bottom_value { bottom->value };
+    ValueComparingNonnullRefPtr<CSSStyleValue const> const left_value { left->value };
 
     bool const top_and_bottom_same = top_value == bottom_value;
     bool const left_and_right_same = left_value == right_value;
@@ -592,6 +595,19 @@ Optional<StyleProperty> CSSStyleProperties::get_property_internal(PropertyID pro
     return property(property_id);
 }
 
+static RefPtr<CSSStyleValue const> resolve_color_style_value(CSSStyleValue const& style_value, Color computed_color)
+{
+    if (style_value.is_color_function())
+        return style_value;
+    if (style_value.is_color()) {
+        auto& color_style_value = static_cast<CSSColorValue const&>(style_value);
+        if (first_is_one_of(color_style_value.color_type(), CSSColorValue::ColorType::Lab, CSSColorValue::ColorType::OKLab, CSSColorValue::ColorType::LCH, CSSColorValue::ColorType::OKLCH))
+            return style_value;
+    }
+
+    return CSSColorValue::create_from_color(computed_color, ColorSyntax::Modern);
+}
+
 RefPtr<CSSStyleValue const> CSSStyleProperties::style_value_for_computed_property(Layout::NodeWithStyle const& layout_node, PropertyID property_id) const
 {
     auto used_value_for_property = [&layout_node, property_id](Function<CSSPixels(Painting::PaintableBox const&)>&& used_value_getter) -> Optional<CSSPixels> {
@@ -652,7 +668,7 @@ RefPtr<CSSStyleValue const> CSSStyleProperties::style_value_for_computed_propert
         // -> A resolved value special case property like color defined in another specification
         //    The resolved value is the used value.
     case PropertyID::BackgroundColor:
-        return CSSColorValue::create_from_color(layout_node.computed_values().background_color(), ColorSyntax::Modern);
+        return resolve_color_style_value(get_computed_value(property_id), layout_node.computed_values().background_color());
     case PropertyID::BorderBlockEndColor:
         // FIXME: Honor writing-mode, direction and text-orientation.
         return style_value_for_computed_property(layout_node, PropertyID::BorderBottomColor);
@@ -660,7 +676,7 @@ RefPtr<CSSStyleValue const> CSSStyleProperties::style_value_for_computed_propert
         // FIXME: Honor writing-mode, direction and text-orientation.
         return style_value_for_computed_property(layout_node, PropertyID::BorderTopColor);
     case PropertyID::BorderBottomColor:
-        return CSSColorValue::create_from_color(layout_node.computed_values().border_bottom().color, ColorSyntax::Modern);
+        return resolve_color_style_value(get_computed_value(property_id), layout_node.computed_values().border_bottom().color);
     case PropertyID::BorderInlineEndColor:
         // FIXME: Honor writing-mode, direction and text-orientation.
         return style_value_for_computed_property(layout_node, PropertyID::BorderRightColor);
@@ -668,21 +684,21 @@ RefPtr<CSSStyleValue const> CSSStyleProperties::style_value_for_computed_propert
         // FIXME: Honor writing-mode, direction and text-orientation.
         return style_value_for_computed_property(layout_node, PropertyID::BorderLeftColor);
     case PropertyID::BorderLeftColor:
-        return CSSColorValue::create_from_color(layout_node.computed_values().border_left().color, ColorSyntax::Modern);
+        return resolve_color_style_value(get_computed_value(property_id), layout_node.computed_values().border_left().color);
     case PropertyID::BorderRightColor:
-        return CSSColorValue::create_from_color(layout_node.computed_values().border_right().color, ColorSyntax::Modern);
+        return resolve_color_style_value(get_computed_value(property_id), layout_node.computed_values().border_right().color);
     case PropertyID::BorderTopColor:
-        return CSSColorValue::create_from_color(layout_node.computed_values().border_top().color, ColorSyntax::Modern);
+        return resolve_color_style_value(get_computed_value(property_id), layout_node.computed_values().border_top().color);
     case PropertyID::BoxShadow:
         return style_value_for_shadow(layout_node.computed_values().box_shadow());
     case PropertyID::CaretColor:
-        return CSSColorValue::create_from_color(layout_node.computed_values().caret_color(), ColorSyntax::Modern);
+        return resolve_color_style_value(get_computed_value(property_id), layout_node.computed_values().caret_color());
     case PropertyID::Color:
-        return CSSColorValue::create_from_color(layout_node.computed_values().color(), ColorSyntax::Modern);
+        return resolve_color_style_value(get_computed_value(property_id), layout_node.computed_values().color());
     case PropertyID::OutlineColor:
-        return CSSColorValue::create_from_color(layout_node.computed_values().outline_color(), ColorSyntax::Modern);
+        return resolve_color_style_value(get_computed_value(property_id), layout_node.computed_values().outline_color());
     case PropertyID::TextDecorationColor:
-        return CSSColorValue::create_from_color(layout_node.computed_values().text_decoration_color(), ColorSyntax::Modern);
+        return resolve_color_style_value(get_computed_value(property_id), layout_node.computed_values().text_decoration_color());
         // NB: text-shadow isn't listed, but is computed the same as box-shadow.
     case PropertyID::TextShadow:
         return style_value_for_shadow(layout_node.computed_values().text_shadow());
@@ -945,8 +961,28 @@ RefPtr<CSSStyleValue const> CSSStyleProperties::style_value_for_computed_propert
         // -> Any other property
         //    The resolved value is the computed value.
         //    NOTE: This is handled inside the `default` case.
+    case PropertyID::BorderBottomWidth: {
+        auto border_bottom_width = layout_node.computed_values().border_bottom().width;
+        return LengthStyleValue::create(Length::make_px(border_bottom_width));
+    }
+    case PropertyID::BorderLeftWidth: {
+        auto border_left_width = layout_node.computed_values().border_left().width;
+        return LengthStyleValue::create(Length::make_px(border_left_width));
+    }
+    case PropertyID::BorderRightWidth: {
+        auto border_right_width = layout_node.computed_values().border_right().width;
+        return LengthStyleValue::create(Length::make_px(border_right_width));
+    }
+    case PropertyID::BorderTopWidth: {
+        auto border_top_width = layout_node.computed_values().border_top().width;
+        return LengthStyleValue::create(Length::make_px(border_top_width));
+    }
+    case PropertyID::OutlineWidth: {
+        auto outline_width = layout_node.computed_values().outline_width();
+        return LengthStyleValue::create(outline_width);
+    }
     case PropertyID::WebkitTextFillColor:
-        return CSSColorValue::create_from_color(layout_node.computed_values().webkit_text_fill_color(), ColorSyntax::Modern);
+        return resolve_color_style_value(get_computed_value(property_id), layout_node.computed_values().webkit_text_fill_color());
     case PropertyID::Invalid:
         return CSSKeywordValue::create(Keyword::Invalid);
     case PropertyID::Custom:
@@ -1017,8 +1053,12 @@ WebIDL::ExceptionOr<String> CSSStyleProperties::remove_property(StringView prope
     }
 
     // 7. If removed is true, Update style attribute for the CSS declaration block.
-    if (removed)
+    if (removed) {
         update_style_attribute();
+
+        // Non-standard: Invalidate style for the owners of our containing sheet, if any.
+        invalidate_owners(DOM::StyleInvalidationReason::CSSStylePropertiesRemoveProperty);
+    }
 
     // 8. Return value.
     return value;
@@ -1041,32 +1081,6 @@ WebIDL::ExceptionOr<void> CSSStyleProperties::set_css_float(StringView value)
     // On setting, the attribute must invoke setProperty() with float as first argument, as second argument the given value,
     // and no third argument. Any exceptions thrown must be re-thrown.
     return set_property("float"sv, value, ""sv);
-}
-
-// https://www.w3.org/TR/cssom/#serialize-a-css-declaration
-static String serialize_a_css_declaration(CSS::PropertyID property, StringView value, Important important)
-{
-    StringBuilder builder;
-
-    // 1. Let s be the empty string.
-    // 2. Append property to s.
-    builder.append(string_from_property_id(property));
-
-    // 3. Append ": " (U+003A U+0020) to s.
-    builder.append(": "sv);
-
-    // 4. Append value to s.
-    builder.append(value);
-
-    // 5. If the important flag is set, append " !important" (U+0020 U+0021 U+0069 U+006D U+0070 U+006F U+0072 U+0074 U+0061 U+006E U+0074) to s.
-    if (important == Important::Yes)
-        builder.append(" !important"sv);
-
-    // 6. Append ";" (U+003B) to s.
-    builder.append(';');
-
-    // 7. Return s.
-    return MUST(builder.to_string());
 }
 
 // https://www.w3.org/TR/cssom/#serialize-a-css-declaration-block
@@ -1100,30 +1114,7 @@ String CSSStyleProperties::serialized() const
         // 6. Let serialized declaration be the result of invoking serialize a CSS declaration with property name property, value value,
         //    and the important flag set if declaration has its important flag set.
         // NB: We have to inline this here as the actual implementation does not accept custom properties.
-        String serialized_declaration = [&] {
-            // https://www.w3.org/TR/cssom/#serialize-a-css-declaration
-            StringBuilder builder;
-
-            // 1. Let s be the empty string.
-            // 2. Append property to s.
-            builder.append(property);
-
-            // 3. Append ": " (U+003A U+0020) to s.
-            builder.append(": "sv);
-
-            // 4. Append value to s.
-            builder.append(value);
-
-            // 5. If the important flag is set, append " !important" (U+0020 U+0021 U+0069 U+006D U+0070 U+006F U+0072 U+0074 U+0061 U+006E U+0074) to s.
-            if (declaration.value.important == Important::Yes)
-                builder.append(" !important"sv);
-
-            // 6. Append ";" (U+003B) to s.
-            builder.append(';');
-
-            // 7. Return s.
-            return MUST(builder.to_string());
-        }();
+        String serialized_declaration = serialize_a_css_declaration(property, value, declaration.value.important);
 
         // 7. Append serialized declaration to list.
         list.append(move(serialized_declaration));
@@ -1150,7 +1141,7 @@ String CSSStyleProperties::serialized() const
 
         // 6. Let serialized declaration be the result of invoking serialize a CSS declaration with property name property, value value,
         //    and the important flag set if declaration has its important flag set.
-        auto serialized_declaration = serialize_a_css_declaration(property, move(value), declaration.important);
+        auto serialized_declaration = serialize_a_css_declaration(string_from_property_id(property), move(value), declaration.important);
 
         // 7. Append serialized declaration to list.
         list.append(move(serialized_declaration));
@@ -1180,7 +1171,19 @@ WebIDL::ExceptionOr<void> CSSStyleProperties::set_css_text(StringView css_text)
     // 4. Update style attribute for the CSS declaration block.
     update_style_attribute();
 
+    // Non-standard: Invalidate style for the owners of our containing sheet, if any.
+    invalidate_owners(DOM::StyleInvalidationReason::CSSStylePropertiesTextChange);
+
     return {};
+}
+
+void CSSStyleProperties::invalidate_owners(DOM::StyleInvalidationReason reason)
+{
+    if (auto rule = parent_rule()) {
+        if (auto sheet = rule->parent_style_sheet()) {
+            sheet->invalidate_owners(reason);
+        }
+    }
 }
 
 // https://drafts.csswg.org/cssom/#set-a-css-declaration
@@ -1226,7 +1229,9 @@ void CSSStyleProperties::set_declarations_from_text(StringView css_text)
     auto parsing_params = owner_node().has_value()
         ? Parser::ParsingParams(owner_node()->element().document())
         : Parser::ParsingParams();
-    auto style = parse_css_style_attribute(parsing_params, css_text);
+    parsing_params.rule_context.append(Parser::RuleContext::Style);
+
+    auto style = parse_css_property_declaration_block(parsing_params, css_text);
     set_the_declarations(style.properties, style.custom_properties);
 }
 

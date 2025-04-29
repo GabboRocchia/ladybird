@@ -16,11 +16,9 @@ namespace JS {
 struct ValueTraits : public Traits<Value> {
     static unsigned hash(Value value)
     {
-        VERIFY(!value.is_empty());
-        if (value.is_string()) {
-            // FIXME: Propagate this error.
-            return value.as_string().byte_string().hash();
-        }
+        VERIFY(!value.is_special_empty_value());
+        if (value.is_string())
+            return value.as_string().utf8_string().hash();
 
         if (value.is_bigint())
             return value.as_bigint().big_integer().hash();

@@ -30,6 +30,7 @@
 #include <LibWeb/HTML/TagNames.h>
 #include <LibWeb/IntersectionObserver/IntersectionObserver.h>
 #include <LibWeb/WebIDL/ExceptionOr.h>
+#include <LibWeb/WebIDL/Types.h>
 
 namespace Web::DOM {
 
@@ -109,7 +110,7 @@ public:
     virtual ~Element() override;
 
     FlyString const& qualified_name() const { return m_qualified_name.as_string(); }
-    FlyString const& html_uppercased_qualified_name() const { return m_html_uppercased_qualified_name; }
+    FlyString const& html_uppercased_qualified_name() const;
 
     virtual FlyString node_name() const final { return html_uppercased_qualified_name(); }
     FlyString const& local_name() const { return m_qualified_name.local_name(); }
@@ -153,11 +154,17 @@ public:
 
     WebIDL::ExceptionOr<bool> toggle_attribute(FlyString const& name, Optional<bool> force);
     size_t attribute_list_size() const;
-    NamedNodeMap const* attributes() const { return m_attributes.ptr(); }
+
+    GC::Ptr<NamedNodeMap const> attributes() const;
+    GC::Ptr<NamedNodeMap> attributes();
+
     Vector<String> get_attribute_names() const;
 
     GC::Ptr<Attr> get_attribute_node(FlyString const& name) const;
     GC::Ptr<Attr> get_attribute_node_ns(Optional<FlyString> const& namespace_, FlyString const& name) const;
+
+    GC::Ptr<DOM::Element> get_the_attribute_associated_element(FlyString const& content_attribute, GC::Ptr<DOM::Element> explicitly_set_attribute_element) const;
+    Optional<GC::RootVector<GC::Ref<DOM::Element>>> get_the_attribute_associated_elements(FlyString const& content_attribute, Optional<Vector<WeakPtr<DOM::Element>>> const& explicitly_set_attribute_elements) const;
 
     DOMTokenList* class_list();
 
@@ -213,10 +220,12 @@ public:
 
     GC::Ptr<CSS::CSSStyleProperties> inline_style() { return m_inline_style; }
     GC::Ptr<CSS::CSSStyleProperties const> inline_style() const { return m_inline_style; }
+    void set_inline_style(GC::Ptr<CSS::CSSStyleProperties>);
 
     GC::Ref<CSS::CSSStyleProperties> style_for_bindings();
 
     CSS::StyleSheetList& document_or_shadow_root_style_sheets();
+    ElementByIdMap& document_or_shadow_root_element_by_id_map();
 
     WebIDL::ExceptionOr<GC::Ref<DOM::DocumentFragment>> parse_fragment(StringView markup);
 
@@ -268,7 +277,7 @@ public:
 
     static GC::Ptr<Layout::NodeWithStyle> create_layout_node_for_display_type(DOM::Document&, CSS::Display const&, GC::Ref<CSS::ComputedProperties>, Element*);
 
-    bool affected_by_hover() const;
+    [[nodiscard]] bool affected_by_pseudo_class(CSS::PseudoClass) const;
     bool includes_properties_from_invalidation_set(CSS::InvalidationSet const&) const;
 
     void set_pseudo_element_node(Badge<Layout::TreeBuilder>, CSS::PseudoElement, GC::Ptr<Layout::NodeWithStyle>);
@@ -317,14 +326,12 @@ public:
     ENUMERATE_ARIA_ATTRIBUTES
 #undef __ENUMERATE_ARIA_ATTRIBUTE
 
-    GC::Ptr<DOM::Element> aria_active_descendant_element() { return m_aria_active_descendant_element; }
-    void set_aria_active_descendant_element(GC::Ptr<DOM::Element> value) { m_aria_active_descendant_element = value; }
-
     virtual bool exclude_from_accessibility_tree() const override;
 
     virtual bool include_in_accessibility_tree() const override;
 
-    virtual Element const* to_element() const override { return this; }
+    virtual Element& to_element() override { return *this; }
+    virtual Element const& to_element() const override { return *this; }
 
     bool is_hidden() const;
     bool has_hidden_ancestor() const;
@@ -464,12 +471,20 @@ public:
     Element const* list_owner() const;
     size_t ordinal_value() const;
 
+    void set_pointer_capture(WebIDL::Long pointer_id);
+    void release_pointer_capture(WebIDL::Long pointer_id);
+    bool has_pointer_capture(WebIDL::Long pointer_id);
+
+    virtual bool contributes_a_script_blocking_style_sheet() const { return false; }
+
 protected:
     Element(Document&, DOM::QualifiedName);
     virtual void initialize(JS::Realm&) override;
 
     virtual void inserted() override;
     virtual void removed_from(Node* old_parent, Node& old_root) override;
+    virtual void moved_from(GC::Ptr<Node> old_parent) override;
+
     virtual void children_changed(ChildrenChangedMetadata const*) override;
     virtual i32 default_tab_index_value() const;
 
@@ -485,7 +500,7 @@ protected:
     CustomElementState custom_element_state() const { return m_custom_element_state; }
 
 private:
-    void make_html_uppercased_qualified_name();
+    FlyString make_html_uppercased_qualified_name() const;
 
     void invalidate_style_after_attribute_change(FlyString const& attribute_name, Optional<String> const& old_value, Optional<String> const& new_value);
 
@@ -499,7 +514,7 @@ private:
     bool is_auto_directionality_form_associated_element() const;
 
     QualifiedName m_qualified_name;
-    FlyString m_html_uppercased_qualified_name;
+    mutable Optional<FlyString> m_html_uppercased_qualified_name;
 
     GC::Ptr<NamedNodeMap> m_attributes;
     GC::Ptr<CSS::CSSStyleProperties> m_inline_style;
@@ -553,7 +568,7 @@ private:
 
     bool m_in_top_layer : 1 { false };
     bool m_rendered_in_top_layer : 1 { false };
-    bool m_style_uses_css_custom_properties { false };
+    bool m_style_uses_css_custom_properties : 1 { false };
     bool m_affected_by_has_pseudo_class_in_subject_position : 1 { false };
     bool m_affected_by_has_pseudo_class_in_non_subject_position : 1 { false };
     bool m_affected_by_direct_sibling_combinator : 1 { false };
@@ -566,8 +581,6 @@ private:
 
     OwnPtr<CSS::CountersSet> m_counters_set;
 
-    GC::Ptr<DOM::Element> m_aria_active_descendant_element;
-
     // https://drafts.csswg.org/css-contain/#proximity-to-the-viewport
     ProximityToTheViewport m_proximity_to_the_viewport { ProximityToTheViewport::NotDetermined };
 };
@@ -575,20 +588,14 @@ private:
 template<>
 inline bool Node::fast_is<Element>() const { return is_element(); }
 
-inline Element* Node::parent_element()
+inline GC::Ptr<Element> Node::parent_element()
 {
-    auto* parent = this->parent();
-    if (!parent || !is<Element>(parent))
-        return nullptr;
-    return static_cast<Element*>(parent);
+    return as_if<Element>(this->parent());
 }
 
-inline Element const* Node::parent_element() const
+inline GC::Ptr<Element const> Node::parent_element() const
 {
-    auto const* parent = this->parent();
-    if (!parent || !is<Element>(parent))
-        return nullptr;
-    return static_cast<Element const*>(parent);
+    return as_if<Element>(this->parent());
 }
 
 inline bool Element::has_class(FlyString const& class_name, CaseSensitivity case_sensitivity) const

@@ -15,6 +15,10 @@ if (CMAKE_TOOLCHAIN_FILE MATCHES "vcpkg.cmake$")
     set(CMAKE_PROJECT_ladybird_INCLUDE_BEFORE "Meta/CMake/vcpkg/generate_vcpkg_toolchain_variables.cmake")
 endif()
 
+if (APPLE AND NOT CMAKE_OSX_SYSROOT)
+    set(CMAKE_OSX_SYSROOT macosx)
+endif()
+
 project(ladybird
         VERSION 0.1.0
         LANGUAGES C CXX
@@ -79,7 +83,7 @@ if (ENABLE_QT AND ENABLE_GUI_TARGETS)
     set(CMAKE_AUTOMOC ON)
     set(CMAKE_AUTORCC ON)
     set(CMAKE_AUTOUIC ON)
-    find_package(Qt6 REQUIRED COMPONENTS Core Widgets Network)
+    find_package(Qt6 REQUIRED COMPONENTS Core Widgets)
 endif()
 
 # We need to find OpenSSL in order to link it explicitly with all targets.

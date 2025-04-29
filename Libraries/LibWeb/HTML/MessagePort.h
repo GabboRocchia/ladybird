@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2021, Andreas Kling <andreas@ladybird.org>
  * Copyright (c) 2023, Andrew Kaster <akaster@serenityos.org>
+ * Copyright (c) 2025, Aliaksandr Kalenik <kalenik.aliaksandr@gmail.com>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -78,28 +79,13 @@ private:
     ErrorOr<void> send_message_on_transport(SerializedTransferRecord const&);
     void read_from_transport();
 
-    enum class ParseDecision {
-        NotEnoughData,
-        ParseNextMessage,
-    };
-    ErrorOr<ParseDecision> parse_message();
-
     // The HTML spec implies(!) that this is MessagePort.[[RemotePort]]
     GC::Ptr<MessagePort> m_remote_port;
 
     // https://html.spec.whatwg.org/multipage/web-messaging.html#has-been-shipped
     bool m_has_been_shipped { false };
 
-    Optional<IPC::Transport> m_transport;
-
-    enum class SocketState : u8 {
-        Header,
-        Data,
-        Error,
-    } m_socket_state { SocketState::Header };
-    size_t m_socket_incoming_message_size { 0 };
-    Queue<IPC::File> m_unprocessed_fds;
-    Vector<u8> m_buffered_data;
+    OwnPtr<IPC::Transport> m_transport;
 
     GC::Ptr<DOM::EventTarget> m_worker_event_target;
 };

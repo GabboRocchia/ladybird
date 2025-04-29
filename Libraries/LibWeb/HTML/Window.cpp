@@ -60,8 +60,6 @@
 #include <LibWeb/HighResolutionTime/TimeOrigin.h>
 #include <LibWeb/Infra/CharacterTypes.h>
 #include <LibWeb/Internals/Internals.h>
-#include <LibWeb/Internals/Processes.h>
-#include <LibWeb/Internals/Settings.h>
 #include <LibWeb/Layout/Viewport.h>
 #include <LibWeb/Page/Page.h>
 #include <LibWeb/Painting/PaintableBox.h>
@@ -130,6 +128,12 @@ void Window::visit_edges(JS::Cell::Visitor& visitor)
     visitor.visit(m_pdf_viewer_plugin_objects);
     visitor.visit(m_pdf_viewer_mime_type_objects);
     visitor.visit(m_close_watcher_manager);
+    visitor.visit(m_locationbar);
+    visitor.visit(m_menubar);
+    visitor.visit(m_personalbar);
+    visitor.visit(m_scrollbars);
+    visitor.visit(m_statusbar);
+    visitor.visit(m_toolbar);
 }
 
 void Window::finalize()
@@ -723,7 +727,7 @@ void Window::set_internals_object_exposed(bool exposed)
     s_internals_object_exposed = exposed;
 }
 
-WebIDL::ExceptionOr<void> Window::initialize_web_interfaces(Badge<WindowEnvironmentSettingsObject>, URL::URL const& url)
+WebIDL::ExceptionOr<void> Window::initialize_web_interfaces(Badge<WindowEnvironmentSettingsObject>)
 {
     auto& realm = this->realm();
     add_window_exposed_interfaces(*this);
@@ -731,19 +735,11 @@ WebIDL::ExceptionOr<void> Window::initialize_web_interfaces(Badge<WindowEnvironm
     WEB_SET_PROTOTYPE_FOR_INTERFACE(Window);
 
     Bindings::WindowGlobalMixin::initialize(realm, *this);
+    Bindings::WindowGlobalMixin::define_unforgeable_attributes(realm, *this);
     WindowOrWorkerGlobalScopeMixin::initialize(realm);
 
     if (s_internals_object_exposed)
         define_direct_property("internals"_fly_string, realm.create<Internals::Internals>(realm), JS::default_attributes);
-
-    if (url.scheme() == "about"sv && url.paths().size() == 1) {
-        auto const& path = url.paths().first();
-
-        if (path == "processes"sv)
-            define_direct_property("processes"_fly_string, realm.create<Internals::Processes>(realm), JS::default_attributes);
-        else if (path == "settings"sv)
-            define_direct_property("settings"_fly_string, realm.create<Internals::Settings>(realm), JS::default_attributes);
-    }
 
     return {};
 }
@@ -904,7 +900,7 @@ void Window::stop()
 // https://html.spec.whatwg.org/multipage/interaction.html#dom-window-focus
 void Window::focus()
 {
-    // 1. Let current be this Window object's navigable.
+    // 1. Let current be this's navigable.
     auto current = navigable();
 
     // 2. If current is null, then return.
@@ -927,7 +923,61 @@ void Window::focus()
 // https://html.spec.whatwg.org/multipage/interaction.html#dom-window-blur
 void Window::blur()
 {
-    // The blur() method steps are to do nothing.
+    // The Window blur() method steps are to do nothing.
+}
+
+// https://html.spec.whatwg.org/multipage/nav-history-apis.html#dom-window-locationbar
+GC::Ref<BarProp const> Window::locationbar()
+{
+    if (!m_locationbar)
+        m_locationbar = BarProp::create(realm());
+
+    return *m_locationbar;
+}
+
+// https://html.spec.whatwg.org/multipage/nav-history-apis.html#dom-window-menubar
+GC::Ref<BarProp const> Window::menubar()
+{
+    if (!m_menubar)
+        m_menubar = BarProp::create(realm());
+
+    return *m_menubar;
+}
+
+// https://html.spec.whatwg.org/multipage/nav-history-apis.html#dom-window-personalbar
+GC::Ref<BarProp const> Window::personalbar()
+{
+    if (!m_personalbar)
+        m_personalbar = BarProp::create(realm());
+
+    return *m_personalbar;
+}
+
+// https://html.spec.whatwg.org/multipage/nav-history-apis.html#dom-window-scrollbars
+GC::Ref<BarProp const> Window::scrollbars()
+{
+    if (!m_scrollbars)
+        m_scrollbars = BarProp::create(realm());
+
+    return *m_scrollbars;
+}
+
+// https://html.spec.whatwg.org/multipage/nav-history-apis.html#dom-window-statusbar
+GC::Ref<BarProp const> Window::statusbar()
+{
+    if (!m_statusbar)
+        m_statusbar = BarProp::create(realm());
+
+    return *m_statusbar;
+}
+
+// https://html.spec.whatwg.org/multipage/nav-history-apis.html#dom-window-toolbar
+GC::Ref<BarProp const> Window::toolbar()
+{
+    if (!m_toolbar)
+        m_toolbar = BarProp::create(realm());
+
+    return *m_toolbar;
 }
 
 // https://html.spec.whatwg.org/multipage/window-object.html#dom-frames
@@ -1140,9 +1190,10 @@ WebIDL::ExceptionOr<void> Window::window_post_message_steps(JS::Value message, W
         // 3. Let source be the WindowProxy object corresponding to incumbentSettings's global object (a Window object).
         auto& source = as<WindowProxy>(incumbent_settings.realm().global_environment().global_this_value());
 
+        TemporaryExecutionContext temporary_execution_context { target_realm, TemporaryExecutionContext::CallbacksEnabled::Yes };
+
         // 4. Let deserializeRecord be StructuredDeserializeWithTransfer(serializeWithTransferResult, targetRealm).
-        auto temporary_execution_context = TemporaryExecutionContext { target_realm, TemporaryExecutionContext::CallbacksEnabled::Yes };
-        auto deserialize_record_or_error = structured_deserialize_with_transfer(vm(), serialize_with_transfer_result);
+        auto deserialize_record_or_error = structured_deserialize_with_transfer(serialize_with_transfer_result, target_realm);
 
         // If this throws an exception, catch it, fire an event named messageerror at targetWindow, using MessageEvent,
         // with the origin attribute initialized to origin and the source attribute initialized to source, and then return.
@@ -1561,7 +1612,7 @@ WebIDL::UnsignedLong Window::request_animation_frame(GC::Ref<WebIDL::CallbackTyp
     // FIXME: Make this fully spec compliant. Currently implements a mix of 'requestAnimationFrame()' and 'run the animation frame callbacks'.
     return animation_frame_callback_driver().add(GC::create_function(heap(), [this, callback](double now) {
         // 3. Invoke callback, passing now as the only argument, and if an exception is thrown, report the exception.
-        auto result = WebIDL::invoke_callback(*callback, {}, JS::Value(now));
+        auto result = WebIDL::invoke_callback(*callback, {}, { { JS::Value(now) } });
         if (result.is_error())
             report_exception(result, realm());
     }));
@@ -1605,7 +1656,7 @@ u32 Window::request_idle_callback(WebIDL::CallbackType& callback, RequestIdleCal
 
     // 4. Push callback to the end of window's list of idle request callbacks, associated with handle.
     auto handler = [callback = GC::make_root(callback)](GC::Ref<RequestIdleCallback::IdleDeadline> deadline) -> JS::Completion {
-        return WebIDL::invoke_callback(*callback, {}, deadline.ptr());
+        return WebIDL::invoke_callback(*callback, {}, { { deadline } });
     };
     m_idle_request_callbacks.append(adopt_ref(*new IdleCallback(move(handler), handle)));
 

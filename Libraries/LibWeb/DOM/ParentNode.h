@@ -35,8 +35,11 @@ public:
     WebIDL::ExceptionOr<void> prepend(Vector<Variant<GC::Root<Node>, String>> const& nodes);
     WebIDL::ExceptionOr<void> append(Vector<Variant<GC::Root<Node>, String>> const& nodes);
     WebIDL::ExceptionOr<void> replace_children(Vector<Variant<GC::Root<Node>, String>> const& nodes);
+    WebIDL::ExceptionOr<void> move_before(GC::Ref<Node> node, GC::Ptr<Node> child);
 
     GC::Ref<HTMLCollection> get_elements_by_class_name(StringView);
+
+    GC::Ptr<Element> get_element_by_id(FlyString const& id) const;
 
 protected:
     ParentNode(JS::Realm& realm, Document& document, NodeType type)

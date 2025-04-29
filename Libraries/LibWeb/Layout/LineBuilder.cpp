@@ -75,9 +75,8 @@ void LineBuilder::begin_new_line(bool increment_y, bool is_first_break_in_sequen
     m_last_line_needs_update = true;
 
     // FIXME: Support text-indent with "each-line".
-    if (m_containing_block_used_values.line_boxes.size() <= 1) {
+    if (m_containing_block_used_values.line_boxes.size() <= 1)
         ensure_last_line_box().m_inline_length += m_text_indent;
-    }
 }
 
 LineBox& LineBuilder::ensure_last_line_box()
@@ -117,27 +116,53 @@ CSSPixels LineBuilder::y_for_float_to_be_inserted_here(Box const& box)
 
     CSSPixels candidate_block_offset = m_current_block_offset;
 
+    // Determine the current line width and subtract trailing whitespace, since those have not yet been removed while
+    // placing floating boxes.
     auto const& current_line = ensure_last_line_box();
+    auto current_line_width = current_line.width() - current_line.get_trailing_whitespace_width();
+
     // If there's already inline content on the current line, check if the new float can fit
     // alongside the content. If not, place it on the next line.
-    if (current_line.width() > 0 && (current_line.width() + width) > m_available_width_for_current_line)
+    if (current_line_width > 0 && (current_line_width + width) > m_available_width_for_current_line)
         candidate_block_offset += current_line.height();
 
     // Then, look for the next Y position where we can fit the new float.
-    // FIXME: This is super dumb, we move 1px downwards per iteration and stop
-    //        when we find an Y value where we don't collide with other floats.
-    while (true) {
-        auto space_at_y_top = m_context.available_space_for_line(candidate_block_offset);
-        auto space_at_y_bottom = m_context.available_space_for_line(candidate_block_offset + height);
-        if (width > space_at_y_top || width > space_at_y_bottom) {
-            if (!m_context.any_floats_intrude_at_block_offset(candidate_block_offset) && !m_context.any_floats_intrude_at_block_offset(candidate_block_offset + height)) {
-                return candidate_block_offset;
-            }
-        } else {
-            return candidate_block_offset;
-        }
-        candidate_block_offset += 1;
+    auto box_in_root_rect = m_context.parent().content_box_rect_in_ancestor_coordinate_space(box_state, m_context.parent().root());
+
+    HashMap<CSSPixels, AvailableSize> available_space_cache;
+    for (;;) {
+        Optional<CSSPixels> highest_intersection_bottom;
+        auto candidate_block_bottom = candidate_block_offset + height;
+
+        m_context.parent().for_each_floating_box([&](auto const& float_box) {
+            auto float_box_top = float_box.margin_box_rect_in_root_coordinate_space.top() - box_in_root_rect.y();
+            auto float_box_bottom = float_box.margin_box_rect_in_root_coordinate_space.bottom() - box_in_root_rect.y();
+            if (float_box_bottom <= candidate_block_offset)
+                return IterationDecision::Continue;
+
+            auto intersection_test = [&](auto y_coordinate, auto top, auto bottom) {
+                if (y_coordinate < top || y_coordinate > bottom)
+                    return;
+                auto available_space = available_space_cache.ensure(y_coordinate, [&]() {
+                    return m_context.available_space_for_line(y_coordinate);
+                });
+                if (width > available_space)
+                    highest_intersection_bottom = min(highest_intersection_bottom.value_or(float_box_bottom), float_box_bottom);
+            };
+
+            intersection_test(float_box_top, candidate_block_offset, candidate_block_bottom);
+            intersection_test(float_box_bottom, candidate_block_offset, candidate_block_bottom);
+            intersection_test(candidate_block_offset, float_box_top, float_box_bottom);
+            intersection_test(candidate_block_bottom, float_box_top, float_box_bottom);
+
+            return IterationDecision::Continue;
+        });
+        if (!highest_intersection_bottom.has_value() || highest_intersection_bottom.value() == candidate_block_offset)
+            break;
+        candidate_block_offset = highest_intersection_bottom.value();
     }
+
+    return max(candidate_block_offset, m_context.vertical_float_clearance());
 }
 
 bool LineBuilder::should_break(CSSPixels next_item_width)
@@ -297,9 +322,19 @@ void LineBuilder::update_last_line()
                 auto const x_height = CSSPixels::nearest_value_for(m_context.containing_block().first_available_font().pixel_metrics().x_height);
                 return m_current_block_offset + line_box_baseline + ((effective_box_top_offset - effective_box_bottom_offset - x_height - fragment.height()) / 2);
             }
-            case CSS::VerticalAlign::Bottom:
             case CSS::VerticalAlign::Sub:
+                // https://drafts.csswg.org/css-inline/#valdef-baseline-shift-sub
+                // Lower by the offset appropriate for subscripts of the parent’s box.
+                // The UA may use the parent’s font metrics to find this offset; otherwise it defaults to dropping by one fifth of the parent’s used font-size.
+                // FIXME: Use font metrics to find a more appropriate offset, if possible
+                return alphabetic_baseline + m_context.containing_block().computed_values().font_size() / 5;
             case CSS::VerticalAlign::Super:
+                // https://drafts.csswg.org/css-inline/#valdef-baseline-shift-super
+                // Raise by the offset appropriate for superscripts of the parent’s box.
+                // The UA may use the parent’s font metrics to find this offset; otherwise it defaults to raising by one third of the parent’s used font-size.
+                // FIXME: Use font metrics to find a more appropriate offset, if possible
+                return alphabetic_baseline - m_context.containing_block().computed_values().font_size() / 3;
+            case CSS::VerticalAlign::Bottom:
             case CSS::VerticalAlign::TextBottom:
             case CSS::VerticalAlign::TextTop:
                 // FIXME: These are all 'baseline'
@@ -379,6 +414,24 @@ void LineBuilder::recalculate_available_space()
     m_available_width_for_current_line = min(available_at_bottom_of_line_box, available_at_top_of_line_box);
     if (!m_containing_block_used_values.line_boxes.is_empty())
         m_containing_block_used_values.line_boxes.last().m_original_available_width = m_available_width_for_current_line;
+}
+
+void LineBuilder::did_introduce_clearance(CSSPixels clearance)
+{
+    // If clearance was introduced but our current line box starts beyond it, we don't need to do anything.
+    if (clearance <= m_current_block_offset)
+        return;
+
+    // Increase the height of the previous line box so it matches the clearance, because the element's height is first
+    // determined by the bottom of the last line box (after trimming empty/whitespace boxes).
+    auto& line_boxes = m_containing_block_used_values.line_boxes;
+    if (line_boxes.size() > 1) {
+        auto& previous_line_box = line_boxes[line_boxes.size() - 2];
+        previous_line_box.m_bottom = clearance;
+    }
+
+    // The current line box will start directly after any cleared floats.
+    m_current_block_offset = clearance;
 }
 
 }

@@ -14,12 +14,21 @@ macro(add_cxx_compile_options)
   add_compile_options($<$<COMPILE_LANGUAGE:C,CXX,ASM>:${args}>)
 endmacro()
 
+macro(add_cxx_compile_definitions)
+  set(args "")
+  foreach(arg ${ARGN})
+    string(APPEND args ${arg}$<SEMICOLON>)
+    add_compile_options("SHELL:$<$<COMPILE_LANGUAGE:Swift>:-Xcc -D${arg}>")
+  endforeach()
+  add_compile_definitions($<$<COMPILE_LANGUAGE:C,CXX,ASM>:${args}>)
+endmacro()
+
 macro(add_cxx_link_options)
   set(args "")
   foreach(arg ${ARGN})
     string(APPEND args ${arg}$<SEMICOLON>)
   endforeach()
-  add_link_options($<$<LINK_LANGUAGE:C,CXX>:${args}>) 
+  add_link_options($<$<LINK_LANGUAGE:C,CXX>:${args}>)
 endmacro()
 
 macro(add_swift_compile_options)
@@ -27,7 +36,7 @@ macro(add_swift_compile_options)
   foreach(arg ${ARGN})
     string(APPEND args ${arg}$<SEMICOLON>)
   endforeach()
-  add_compile_options($<$<COMPILE_LANGUAGE:Swift>:${args}>) 
+  add_compile_options($<$<COMPILE_LANGUAGE:Swift>:${args}>)
 endmacro()
 
 macro(add_swift_link_options)
@@ -35,12 +44,11 @@ macro(add_swift_link_options)
   foreach(arg ${ARGN})
     string(APPEND args ${arg}$<SEMICOLON>)
   endforeach()
-  add_link_options($<$<LINK_LANGUAGE:Swift>:${args}>) 
+  add_link_options($<$<LINK_LANGUAGE:Swift>:${args}>)
 endmacro()
 
 # FIXME: Rework these flags to remove the suspicious ones.
 if (WIN32)
-  add_compile_options(-Wno-unknown-attributes) # [[no_unique_address]] is broken in MSVC ABI until next ABI break
   add_compile_options(-Wno-reinterpret-base-class)
   add_compile_options(-Wno-microsoft-unqualified-friend) # MSVC doesn't support unqualified friends
   add_compile_definitions(_CRT_SECURE_NO_WARNINGS) # _s replacements not desired (or implemented on any other platform other than VxWorks)
@@ -96,7 +104,13 @@ elseif (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     # Only ignore expansion-to-defined for g++, clang's implementation doesn't complain about function-like macros
     add_cxx_compile_options(-Wno-expansion-to-defined)
     add_cxx_compile_options(-Wno-literal-suffix)
+    add_cxx_compile_options(-Wno-unqualified-std-cast-call)
     add_cxx_compile_options(-Wvla)
+
+    # FIXME: These warnings trigger on Function and ByteBuffer in GCC (only when LTO is disabled...)
+    #        investigate this and maybe reenable them if they're not false positives/invalid.
+    add_cxx_compile_options(-Wno-array-bounds)
+    add_cxx_compile_options(-Wno-stringop-overflow)
 
     # FIXME: This warning seems useful but has too many false positives with GCC 13.
     add_cxx_compile_options(-Wno-dangling-reference)
@@ -123,4 +137,9 @@ endif()
 
 if (NOT MSVC)
     add_cxx_compile_options(-fstrict-flex-arrays=2)
+endif()
+
+# FIXME: https://github.com/swiftlang/swift/issues/80764
+if (CMAKE_Swift_COMPILER_LOADED)
+    add_cxx_compile_definitions(AK_DISABLE_NO_UNIQUE_ADDRESS)
 endif()

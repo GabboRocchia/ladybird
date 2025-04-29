@@ -151,6 +151,7 @@ class BasicShapeStyleValue;
 class BorderRadiusStyleValue;
 class CalculatedStyleValue;
 class Clip;
+class ColorMixStyleValue;
 class ColorSchemeStyleValue;
 class ConicGradientStyleValue;
 class ContentStyleValue;
@@ -159,6 +160,7 @@ class CounterStyleValue;
 class CSSAnimation;
 class CSSColorValue;
 class CSSConditionRule;
+class CSSFontFaceDescriptors;
 class CSSFontFaceRule;
 class CSSGroupingRule;
 class CSSHSL;
@@ -198,6 +200,7 @@ class FlexOrCalculated;
 class FlexStyleValue;
 class FontFace;
 class FontFaceSet;
+class FontSourceStyleValue;
 class Frequency;
 class FrequencyOrCalculated;
 class FrequencyPercentage;
@@ -265,7 +268,9 @@ class TimeStyleValue;
 class Transformation;
 class TransformationStyleValue;
 class TransitionStyleValue;
+class UnicodeRangeStyleValue;
 class UnresolvedStyleValue;
+class URL;
 class URLStyleValue;
 class VisualViewport;
 
@@ -311,6 +316,7 @@ class DOMImplementation;
 class DOMTokenList;
 class EditingHostManager;
 class Element;
+class ElementByIdMap;
 class Event;
 class EventHandler;
 class EventTarget;
@@ -415,6 +421,7 @@ namespace Web::HTML {
 class AnimationFrameCallbackDriver;
 class AudioTrack;
 class AudioTrackList;
+class BarProp;
 class BeforeUnloadEvent;
 class BroadcastChannel;
 class BrowsingContext;
@@ -572,7 +579,7 @@ class Window;
 class WindowEnvironmentSettingsObject;
 class WindowProxy;
 class Worker;
-class WorkerAgent;
+class WorkerAgentParent;
 class WorkerDebugConsoleClient;
 class WorkerEnvironmentSettingsObject;
 class WorkerGlobalScope;
@@ -619,12 +626,14 @@ class IDBOpenDBRequest;
 class IDBRequest;
 class IDBTransaction;
 class IDBVersionChangeEvent;
+class Index;
+class ObjectStore;
 class RequestList;
 }
 
 namespace Web::Internals {
 class Internals;
-class Processes;
+class WebUI;
 }
 
 namespace Web::IntersectionObserver {
@@ -778,6 +787,7 @@ class ByteLengthQueuingStrategy;
 class CountQueuingStrategy;
 class ReadableByteStreamController;
 class ReadableStream;
+class ReadableStreamAsyncIterator;
 class ReadableStreamBYOBReader;
 class ReadableStreamBYOBRequest;
 class ReadableStreamDefaultController;
@@ -919,6 +929,7 @@ class WebGLVertexArrayObject;
 
 namespace Web::WebGL::Extensions {
 class ANGLEInstancedArrays;
+class EXTBlendMinMax;
 class EXTColorBufferFloat;
 class OESVertexArrayObject;
 class WebGLCompressedTextureS3tc;

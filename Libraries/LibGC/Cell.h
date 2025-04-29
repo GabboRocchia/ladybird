@@ -12,6 +12,7 @@
 #include <AK/HashMap.h>
 #include <AK/Noncopyable.h>
 #include <AK/StringView.h>
+#include <AK/Swift.h>
 #include <AK/Weakable.h>
 #include <LibGC/Forward.h>
 #include <LibGC/Internals.h>
@@ -36,7 +37,7 @@ public:                                            \
     }                                              \
     friend class GC::Heap;
 
-class Cell : public Weakable<Cell> {
+class Cell {
     AK_MAKE_NONCOPYABLE(Cell);
     AK_MAKE_NONMOVABLE(Cell);
 
@@ -64,17 +65,17 @@ public:
                 visit_impl(*cell);
         }
 
-        void visit(Cell& cell)
+        void visit(Cell& cell) SWIFT_NAME(visitRef(_:))
         {
             visit_impl(cell);
         }
 
-        void visit(Cell const* cell)
+        void visit(Cell const* cell) SWIFT_NAME(visitConst(_:))
         {
             visit(const_cast<Cell*>(cell));
         }
 
-        void visit(Cell const& cell)
+        void visit(Cell const& cell) SWIFT_NAME(visitConstRef(_:))
         {
             visit(const_cast<Cell&>(cell));
         }
@@ -106,8 +107,8 @@ public:
                 visit(value);
         }
 
-        template<typename T>
-        void visit(Vector<T> const& vector)
+        template<typename T, size_t inline_capacity>
+        void visit(Vector<T, inline_capacity> const& vector)
         {
             for (auto& value : vector)
                 visit(value);
@@ -149,7 +150,7 @@ public:
             }
         }
 
-        void visit(NanBoxedValue const& value);
+        void visit(NanBoxedValue const& value) SWIFT_NAME(visitValue(_:));
 
         // Allow explicitly ignoring a GC-allocated member in a visit_edges implementation instead
         // of just not using it.
@@ -163,7 +164,7 @@ public:
     protected:
         virtual void visit_impl(Cell&) = 0;
         virtual ~Visitor() = default;
-    };
+    } SWIFT_UNSAFE_REFERENCE;
 
     virtual void visit_edges(Visitor&) { }
 
@@ -187,10 +188,10 @@ protected:
     void set_overrides_must_survive_garbage_collection(bool b) { m_overrides_must_survive_garbage_collection = b; }
 
 private:
-    bool m_mark : 1 { false };
-    bool m_overrides_must_survive_garbage_collection : 1 { false };
-    State m_state : 1 { State::Live };
-};
+    bool m_mark { false };
+    bool m_overrides_must_survive_garbage_collection { false };
+    State m_state { State::Live };
+} SWIFT_UNSAFE_REFERENCE;
 
 }
 

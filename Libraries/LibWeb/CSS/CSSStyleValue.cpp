@@ -33,6 +33,7 @@
 #include <LibWeb/CSS/StyleValues/FilterValueListStyleValue.h>
 #include <LibWeb/CSS/StyleValues/FitContentStyleValue.h>
 #include <LibWeb/CSS/StyleValues/FlexStyleValue.h>
+#include <LibWeb/CSS/StyleValues/FontSourceStyleValue.h>
 #include <LibWeb/CSS/StyleValues/FrequencyStyleValue.h>
 #include <LibWeb/CSS/StyleValues/GridAutoFlowStyleValue.h>
 #include <LibWeb/CSS/StyleValues/GridTemplateAreaStyleValue.h>
@@ -60,6 +61,7 @@
 #include <LibWeb/CSS/StyleValues/TransformationStyleValue.h>
 #include <LibWeb/CSS/StyleValues/TransitionStyleValue.h>
 #include <LibWeb/CSS/StyleValues/URLStyleValue.h>
+#include <LibWeb/CSS/StyleValues/UnicodeRangeStyleValue.h>
 #include <LibWeb/CSS/StyleValues/UnresolvedStyleValue.h>
 
 namespace Web::CSS {
@@ -193,6 +195,12 @@ FlexStyleValue const& CSSStyleValue::as_flex() const
 {
     VERIFY(is_flex());
     return static_cast<FlexStyleValue const&>(*this);
+}
+
+FontSourceStyleValue const& CSSStyleValue::as_font_source() const
+{
+    VERIFY(is_font_source());
+    return static_cast<FontSourceStyleValue const&>(*this);
 }
 
 FrequencyStyleValue const& CSSStyleValue::as_frequency() const
@@ -349,6 +357,12 @@ TransitionStyleValue const& CSSStyleValue::as_transition() const
 {
     VERIFY(is_transition());
     return static_cast<TransitionStyleValue const&>(*this);
+}
+
+UnicodeRangeStyleValue const& CSSStyleValue::as_unicode_range() const
+{
+    VERIFY(is_unicode_range());
+    return static_cast<UnicodeRangeStyleValue const&>(*this);
 }
 
 UnresolvedStyleValue const& CSSStyleValue::as_unresolved() const

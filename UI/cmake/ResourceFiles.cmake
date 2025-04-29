@@ -74,6 +74,16 @@ set(ABOUT_PAGES
 )
 list(TRANSFORM ABOUT_PAGES PREPEND "${LADYBIRD_SOURCE_DIR}/Base/res/ladybird/about-pages/")
 
+set(ABOUT_SETTINGS_RESOURCES
+    languages.js
+    network.js
+    new-tab-page.js
+    permissions.js
+    privacy.js
+    search.js
+)
+list(TRANSFORM ABOUT_SETTINGS_RESOURCES PREPEND "${LADYBIRD_SOURCE_DIR}/Base/res/ladybird/about-pages/settings/")
+
 set(WEB_TEMPLATES
     directory.html
     error.html
@@ -89,7 +99,6 @@ list(TRANSFORM THEMES PREPEND "${LADYBIRD_SOURCE_DIR}/Base/res/themes/")
 
 set(CONFIG_RESOURCES
     bookmarks.json
-    BrowserAutoplayAllowlist.txt
     BrowserContentFilters.txt
 )
 list(TRANSFORM CONFIG_RESOURCES PREPEND "${LADYBIRD_SOURCE_DIR}/Base/res/ladybird/default-config/")
@@ -168,6 +177,10 @@ function(copy_resources_to_build base_directory bundle_target)
     )
 
     copy_resource_set(ladybird/about-pages RESOURCES ${ABOUT_PAGES}
+        DESTINATION ${base_directory} TARGET ${bundle_target}
+    )
+
+    copy_resource_set(ladybird/about-pages/settings RESOURCES ${ABOUT_SETTINGS_RESOURCES}
         DESTINATION ${base_directory} TARGET ${bundle_target}
     )
 

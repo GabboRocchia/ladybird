@@ -34,14 +34,15 @@ struct TargetSnapshotParams {
 };
 
 // https://html.spec.whatwg.org/multipage/document-sequences.html#navigable
-class Navigable : public JS::Cell {
+class Navigable : public JS::Cell
+    , public Weakable<Navigable> {
     GC_CELL(Navigable, JS::Cell);
     GC_DECLARE_ALLOCATOR(Navigable);
 
 public:
     virtual ~Navigable() override;
 
-    using NullOrError = Optional<StringView>;
+    using NullOrError = Optional<String>;
     using NavigationParamsVariant = Variant<NullOrError, GC::Ref<NavigationParams>, GC::Ref<NonFetchSchemeNavigationParams>>;
 
     ErrorOr<void> initialize_navigable(GC::Ref<DocumentState> document_state, GC::Ptr<Navigable> parent);
@@ -51,7 +52,7 @@ public:
 
     Vector<GC::Root<Navigable>> child_navigables() const;
 
-    bool is_traversable() const;
+    virtual bool is_traversable() const { return false; }
 
     String const& id() const { return m_id; }
     GC::Ptr<Navigable> parent() const { return m_parent; }
@@ -185,7 +186,12 @@ public:
     bool has_session_history_entry_and_ready_for_navigation() const { return m_has_session_history_entry_and_ready_for_navigation; }
     void set_has_session_history_entry_and_ready_for_navigation();
 
+    void inform_the_navigation_api_about_child_navigable_destruction();
+
     bool has_pending_navigations() const { return !m_pending_navigations.is_empty(); }
+
+    template<typename T>
+    bool fast_is() const = delete;
 
 protected:
     explicit Navigable(GC::Ref<Page>);

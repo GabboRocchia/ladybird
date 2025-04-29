@@ -3,6 +3,7 @@ include(fontconfig)
 set(SOURCES
     Application.cpp
     Attribute.cpp
+    Autocomplete.cpp
     BrowserProcess.cpp
     ConsoleOutput.cpp
     CookieJar.cpp
@@ -24,6 +25,9 @@ set(SOURCES
     Utilities.cpp
     ViewImplementation.cpp
     WebContentClient.cpp
+    WebUI.cpp
+    WebUI/ProcessesUI.cpp
+    WebUI/SettingsUI.cpp
 )
 
 if (APPLE)
@@ -69,13 +73,15 @@ set(GENERATED_SOURCES
     ../../Services/WebContent/WebContentServerEndpoint.h
     ../../Services/WebContent/WebDriverClientEndpoint.h
     ../../Services/WebContent/WebDriverServerEndpoint.h
+    ../../Services/WebContent/WebUIClientEndpoint.h
+    ../../Services/WebContent/WebUIServerEndpoint.h
     NativeStyleSheetSource.cpp
     UIProcessClientEndpoint.h
     UIProcessServerEndpoint.h
 )
 
 serenity_lib(LibWebView webview)
-target_link_libraries(LibWebView PRIVATE LibCore LibDevTools LibFileSystem LibGfx LibImageDecoderClient LibIPC LibRequests LibJS LibWeb LibUnicode LibURL LibSyntax)
+target_link_libraries(LibWebView PRIVATE LibCore LibDevTools LibFileSystem LibGfx LibImageDecoderClient LibIPC LibRequests LibJS LibWeb LibUnicode LibURL LibSyntax LibTextCodec)
 
 if (APPLE)
     target_link_libraries(LibWebView PRIVATE LibThreading)

@@ -41,7 +41,7 @@ ErrorOr<GC::Ref<SVGDecodedImageData>> SVGDecodedImageData::create(JS::Realm& rea
     navigation_params->navigable = navigable;
     navigation_params->response = response;
     navigation_params->origin = URL::Origin {};
-    navigation_params->policy_container = navigable->heap().allocate<HTML::PolicyContainer>(navigable->active_document()->realm());
+    navigation_params->policy_container = navigable->heap().allocate<HTML::PolicyContainer>(realm.heap());
     navigation_params->final_sandboxing_flag_set = HTML::SandboxingFlagSet {};
     navigation_params->opener_policy = HTML::OpenerPolicy {};
 
@@ -106,8 +106,8 @@ RefPtr<Gfx::Bitmap> SVGDecodedImageData::render(Gfx::IntSize size) const
     case DisplayListPlayerType::SkiaCPU: {
         auto painting_surface = Gfx::PaintingSurface::wrap_bitmap(*bitmap);
         Painting::DisplayListPlayerSkia display_list_player;
-        display_list_player.set_surface(painting_surface);
-        display_list_player.execute(*display_list);
+        Painting::ScrollStateSnapshot scroll_state_snapshot;
+        display_list_player.execute(*display_list, scroll_state_snapshot, painting_surface);
         break;
     }
     default:

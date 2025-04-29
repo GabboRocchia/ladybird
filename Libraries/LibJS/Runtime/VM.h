@@ -21,6 +21,7 @@
 #include <LibGC/RootVector.h>
 #include <LibJS/CyclicModule.h>
 #include <LibJS/ModuleLoading.h>
+#include <LibJS/Runtime/Agent.h>
 #include <LibJS/Runtime/CommonPropertyNames.h>
 #include <LibJS/Runtime/Completion.h>
 #include <LibJS/Runtime/Error.h>
@@ -46,19 +47,13 @@ enum class EvalMode {
 
 class VM : public RefCounted<VM> {
 public:
-    struct CustomData {
-        virtual ~CustomData() = default;
-
-        virtual void spin_event_loop_until(GC::Root<GC::Function<bool()>> goal_condition) = 0;
-    };
-
-    static ErrorOr<NonnullRefPtr<VM>> create(OwnPtr<CustomData> = {});
+    static NonnullRefPtr<VM> create();
     ~VM();
 
     GC::Heap& heap() { return m_heap; }
     GC::Heap const& heap() const { return m_heap; }
 
-    Bytecode::Interpreter& bytecode_interpreter();
+    Bytecode::Interpreter& bytecode_interpreter() { return *m_bytecode_interpreter; }
 
     void dump_backtrace() const;
 
@@ -75,11 +70,6 @@ public:
     HashMap<String, GC::Ptr<PrimitiveString>>& string_cache()
     {
         return m_string_cache;
-    }
-
-    HashMap<ByteString, GC::Ptr<PrimitiveString>>& byte_string_cache()
-    {
-        return m_byte_string_cache;
     }
 
     HashMap<Utf16String, GC::Ptr<PrimitiveString>>& utf16_string_cache()
@@ -122,14 +112,24 @@ public:
     ThrowCompletionOr<void> push_execution_context(ExecutionContext& context, CheckStackSpaceLimitTag)
     {
         // Ensure we got some stack space left, so the next function call doesn't kill us.
-        if (did_reach_stack_space_limit())
+        if (did_reach_stack_space_limit()) [[unlikely]] {
             return throw_completion<InternalError>(ErrorType::CallStackSizeExceeded);
-        push_execution_context(context);
+        }
+        m_execution_context_stack.append(&context);
         return {};
     }
 
-    void push_execution_context(ExecutionContext&);
-    void pop_execution_context();
+    void push_execution_context(ExecutionContext& context)
+    {
+        m_execution_context_stack.append(&context);
+    }
+
+    void pop_execution_context()
+    {
+        m_execution_context_stack.take_last();
+        if (m_execution_context_stack.is_empty() && on_call_stack_emptied)
+            on_call_stack_emptied();
+    }
 
     // https://tc39.es/ecma262/#running-execution-context
     // At any point in time, there is at most one execution context per agent that is actually executing code.
@@ -170,21 +170,17 @@ public:
 
     size_t argument_count() const
     {
-        if (m_execution_context_stack.is_empty())
-            return 0;
         return running_execution_context().arguments.size();
     }
 
     Value argument(size_t index) const
     {
-        if (m_execution_context_stack.is_empty())
-            return {};
         return running_execution_context().argument(index);
     }
 
     Value this_value() const
     {
-        return running_execution_context().this_value;
+        return running_execution_context().this_value.value();
     }
 
     ThrowCompletionOr<Value> resolve_this_binding();
@@ -238,9 +234,16 @@ public:
         GC::Ptr<PrimitiveString> boolean;
         GC::Ptr<PrimitiveString> bigint;
         GC::Ptr<PrimitiveString> function;
-    } typeof_strings;
+        GC::Ptr<PrimitiveString> object_Object;
+    } cached_strings;
 
-    void run_queued_promise_jobs();
+    void run_queued_promise_jobs()
+    {
+        if (m_promise_jobs.is_empty())
+            return;
+        run_queued_promise_jobs_impl();
+    }
+
     void enqueue_promise_job(GC::Ref<GC::Function<ThrowCompletionOr<Value>()>> job, Realm*);
 
     void run_queued_finalization_registry_cleanup_jobs();
@@ -253,7 +256,9 @@ public:
     Function<void(Promise&)> on_promise_rejection_handled;
     Function<void(Object const&, PropertyKey const&)> on_unimplemented_property_access;
 
-    CustomData* custom_data() { return m_custom_data; }
+    void set_agent(OwnPtr<Agent> agent) { m_agent = move(agent); }
+    Agent* agent() { return m_agent; }
+    Agent const* agent() const { return m_agent; }
 
     void save_execution_context_stack();
     void clear_execution_context_stack();
@@ -302,15 +307,16 @@ private:
 #undef __JS_ENUMERATE
     };
 
-    VM(OwnPtr<CustomData>, ErrorMessages);
+    explicit VM(ErrorMessages);
 
     void load_imported_module(ImportedModuleReferrer, ModuleRequest const&, GC::Ptr<GraphLoadingState::HostDefined>, ImportedModulePayload);
     ThrowCompletionOr<void> link_and_eval_module(CyclicModule&);
 
     void set_well_known_symbols(WellKnownSymbols well_known_symbols) { m_well_known_symbols = move(well_known_symbols); }
 
+    void run_queued_promise_jobs_impl();
+
     HashMap<String, GC::Ptr<PrimitiveString>> m_string_cache;
-    HashMap<ByteString, GC::Ptr<PrimitiveString>> m_byte_string_cache;
     HashMap<Utf16String, GC::Ptr<PrimitiveString>> m_utf16_string_cache;
 
     GC::Heap m_heap;
@@ -348,7 +354,7 @@ private:
 
     u32 m_execution_generation { 0 };
 
-    OwnPtr<CustomData> m_custom_data;
+    OwnPtr<Agent> m_agent;
 
     OwnPtr<Bytecode::Interpreter> m_bytecode_interpreter;
 

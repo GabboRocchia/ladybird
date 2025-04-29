@@ -282,7 +282,7 @@ ThrowCompletionOr<GC::Ref<Object>> PromiseConstructor::construct(FunctionObject&
     // 10. If completion is an abrupt completion, then
     if (completion.is_error()) {
         // a. Perform ? Call(resolvingFunctions.[[Reject]], undefined, « completion.[[Value]] »).
-        TRY(JS::call(vm, *reject_function, js_undefined(), *completion.release_error().value()));
+        TRY(JS::call(vm, *reject_function, js_undefined(), completion.release_error().value()));
     }
 
     // 11. Return promise.
@@ -465,7 +465,7 @@ JS_DEFINE_NATIVE_FUNCTION(PromiseConstructor::try_)
     auto callback = vm.argument(0);
     Span<Value> args;
     if (vm.argument_count() > 1) {
-        args = vm.running_execution_context().arguments.span().slice(1, vm.argument_count() - 1);
+        args = vm.running_execution_context().arguments.slice(1, vm.argument_count() - 1);
     }
 
     // 1. Let C be the this value.
@@ -484,7 +484,7 @@ JS_DEFINE_NATIVE_FUNCTION(PromiseConstructor::try_)
     // 5. If status is an abrupt completion, then
     if (status.is_throw_completion()) {
         // a. Perform ? Call(promiseCapability.[[Reject]], undefined, « status.[[Value]] »).
-        TRY(JS::call(vm, *promise_capability->reject(), js_undefined(), *status.throw_completion().value()));
+        TRY(JS::call(vm, *promise_capability->reject(), js_undefined(), status.throw_completion().value()));
     }
     // 6. Else,
     else {

@@ -21,7 +21,7 @@ namespace Web::CSS {
 namespace FilterOperation {
 
 struct Blur {
-    Optional<LengthOrCalculated> radius;
+    LengthOrCalculated radius { Length::make_px(0) };
     float resolved_radius(Layout::Node const&) const;
     bool operator==(Blur const&) const = default;
 };
@@ -39,14 +39,14 @@ struct HueRotate {
         bool operator==(Zero const&) const = default;
     };
     using AngleOrZero = Variant<AngleOrCalculated, Zero>;
-    Optional<AngleOrZero> angle;
+    AngleOrZero angle { Angle::make_degrees(0) };
     float angle_degrees(Layout::Node const&) const;
     bool operator==(HueRotate const&) const = default;
 };
 
 struct Color {
     Gfx::ColorFilter::Type operation;
-    Optional<NumberPercentage> amount {};
+    NumberPercentage amount { Number { Number::Type::Integer, 1.0 } };
     float resolved_amount() const;
     bool operator==(Color const&) const = default;
 };
@@ -57,7 +57,7 @@ using FilterFunction = Variant<FilterOperation::Blur, FilterOperation::DropShado
 
 class FilterValueListStyleValue final : public StyleValueWithDefaultOperators<FilterValueListStyleValue> {
 public:
-    static ValueComparingNonnullRefPtr<FilterValueListStyleValue> create(
+    static ValueComparingNonnullRefPtr<FilterValueListStyleValue const> create(
         Vector<FilterFunction> filter_value_list)
     {
         VERIFY(filter_value_list.size() >= 1);

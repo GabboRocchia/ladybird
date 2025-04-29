@@ -5,6 +5,7 @@
  */
 
 #include <AK/MemoryStream.h>
+#include <LibJS/Runtime/ValueInlines.h>
 #include <LibTest/JavaScriptTestRunner.h>
 #include <LibWasm/AbstractMachine/BytecodeInterpreter.h>
 #include <LibWasm/Types.h>
@@ -265,7 +266,7 @@ TESTJS_GLOBAL_FUNCTION(test_simd_vector, testSIMDVector)
                     return false;
                 continue;
             }
-            return vm.throw_completion<JS::TypeError>(ByteString::formatted("Bad SIMD float expectation: {}"sv, string));
+            return vm.throw_completion<JS::TypeError>(ByteString::formatted("Bad SIMD float expectation: {}", string));
         }
         u64 expect_value = expect.is_bigint() ? TRY(expect.to_bigint_uint64(vm)) : (u64)TRY(expect.to_index(vm));
         if (got != expect_value)
@@ -283,14 +284,14 @@ void WebAssemblyModule::initialize(JS::Realm& realm)
 
 JS_DEFINE_NATIVE_FUNCTION(WebAssemblyModule::get_export)
 {
-    auto name = TRY(vm.argument(0).to_byte_string(vm));
+    auto name = TRY(vm.argument(0).to_string(vm));
     auto this_value = vm.this_value();
     auto object = TRY(this_value.to_object(vm));
     if (!is<WebAssemblyModule>(*object))
         return vm.throw_completion<JS::TypeError>("Not a WebAssemblyModule"sv);
     auto& instance = static_cast<WebAssemblyModule&>(*object);
     for (auto& entry : instance.module_instance().exports()) {
-        if (entry.name() == name) {
+        if (entry.name() == name.to_byte_string()) {
             auto& value = entry.value();
             if (auto ptr = value.get_pointer<Wasm::FunctionAddress>())
                 return JS::Value(static_cast<unsigned long>(ptr->value()));
@@ -400,11 +401,11 @@ JS_DEFINE_NATIVE_FUNCTION(WebAssemblyModule::wasm_invoke)
 
     auto functype = WebAssemblyModule::machine().store().get(function_address)->visit([&](auto& func) { return func.type(); });
     auto result = WebAssemblyModule::machine().invoke(function_address, arguments);
-    if (result.is_trap())
-        return vm.throw_completion<JS::TypeError>(TRY_OR_THROW_OOM(vm, String::formatted("Execution trapped: {}", result.trap().reason)));
-
-    if (result.is_completion())
-        return result.completion();
+    if (result.is_trap()) {
+        if (auto ptr = result.trap().data.get_pointer<Wasm::ExternallyManagedTrap>())
+            return ptr->unsafe_external_object_as<JS::Completion>();
+        return vm.throw_completion<JS::TypeError>(TRY_OR_THROW_OOM(vm, String::formatted("Execution trapped: {}", result.trap().format())));
+    }
 
     if (result.values().is_empty())
         return JS::js_null();

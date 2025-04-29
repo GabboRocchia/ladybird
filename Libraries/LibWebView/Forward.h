@@ -11,6 +11,7 @@
 namespace WebView {
 
 class Application;
+class Autocomplete;
 class CookieJar;
 class Database;
 class OutOfProcessWebView;
@@ -18,8 +19,10 @@ class ProcessManager;
 class Settings;
 class ViewImplementation;
 class WebContentClient;
+class WebUI;
 
 struct Attribute;
+struct AutocompleteEngine;
 struct ConsoleOutput;
 struct CookieStorageKey;
 struct DOMNodeProperties;

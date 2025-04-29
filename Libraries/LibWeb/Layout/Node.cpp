@@ -53,6 +53,7 @@ void Node::visit_edges(Cell::Visitor& visitor)
     for (auto const& paintable : m_paintable) {
         visitor.visit(GC::Ptr { &paintable });
     }
+    visitor.visit(m_containing_block);
     visitor.visit(m_pseudo_element_generator);
     TreeNode::visit_edges(visitor);
 }
@@ -106,9 +107,9 @@ bool Node::can_contain_boxes_with_position_absolute() const
     return false;
 }
 
-static Box const* nearest_ancestor_capable_of_forming_a_containing_block(Node const& node)
+static GC::Ptr<Box> nearest_ancestor_capable_of_forming_a_containing_block(Node& node)
 {
-    for (auto const* ancestor = node.parent(); ancestor; ancestor = ancestor->parent()) {
+    for (auto* ancestor = node.parent(); ancestor; ancestor = ancestor->parent()) {
         if (ancestor->is_block_container()
             || ancestor->display().is_flex_inside()
             || ancestor->display().is_grid_inside()
@@ -119,31 +120,36 @@ static Box const* nearest_ancestor_capable_of_forming_a_containing_block(Node co
     return nullptr;
 }
 
-Box const* Node::containing_block() const
+void Node::recompute_containing_block(Badge<DOM::Document>)
 {
-    if (is<TextNode>(*this))
-        return nearest_ancestor_capable_of_forming_a_containing_block(*this);
+    if (is<TextNode>(*this)) {
+        m_containing_block = nearest_ancestor_capable_of_forming_a_containing_block(*this);
+        return;
+    }
 
     auto position = computed_values().position();
 
     // https://drafts.csswg.org/css-position-3/#absolute-cb
     if (position == CSS::Positioning::Absolute) {
-        auto const* ancestor = parent();
+        auto* ancestor = parent();
         while (ancestor && !ancestor->can_contain_boxes_with_position_absolute())
             ancestor = ancestor->parent();
-        return static_cast<Box const*>(ancestor);
+        m_containing_block = static_cast<Box*>(ancestor);
+        return;
     }
 
-    if (position == CSS::Positioning::Fixed)
-        return &root();
+    if (position == CSS::Positioning::Fixed) {
+        m_containing_block = &root();
+        return;
+    }
 
-    return nearest_ancestor_capable_of_forming_a_containing_block(*this);
+    m_containing_block = nearest_ancestor_capable_of_forming_a_containing_block(*this);
 }
 
 // returns containing block this node would have had if its position was static
 Box const* Node::static_position_containing_block() const
 {
-    return nearest_ancestor_capable_of_forming_a_containing_block(*this);
+    return nearest_ancestor_capable_of_forming_a_containing_block(const_cast<Node&>(*this));
 }
 
 Box const* Node::non_anonymous_containing_block() const
@@ -397,6 +403,7 @@ void NodeWithStyle::apply_style(CSS::ComputedProperties const& computed_style)
         auto const& y_positions = computed_style.property(CSS::PropertyID::BackgroundPositionY);
         auto const& repeats = computed_style.property(CSS::PropertyID::BackgroundRepeat);
         auto const& sizes = computed_style.property(CSS::PropertyID::BackgroundSize);
+        auto const& background_blend_modes = computed_style.property(CSS::PropertyID::BackgroundBlendMode);
 
         auto count_layers = [](auto const& maybe_style_value) -> size_t {
             if (maybe_style_value.is_value_list())
@@ -509,6 +516,8 @@ void NodeWithStyle::apply_style(CSS::ComputedProperties const& computed_style)
                 layer.repeat_x = repeat_value->as_background_repeat().repeat_x();
                 layer.repeat_y = repeat_value->as_background_repeat().repeat_y();
             }
+
+            layer.blend_mode = CSS::keyword_to_mix_blend_mode(value_for_layer(background_blend_modes, layer_index)->to_keyword()).value_or(CSS::MixBlendMode::Normal);
 
             layers.append(move(layer));
         }
@@ -725,6 +734,29 @@ void NodeWithStyle::apply_style(CSS::ComputedProperties const& computed_style)
         computed_values.set_transition_delay(transition_delay.resolve_time({ .length_resolution_context = CSS::Length::ResolutionContext::for_layout_node(*this) }).value());
     }
 
+    auto resolve_border_width = [&](CSS::PropertyID width_property) -> CSSPixels {
+        auto const& value = computed_style.property(width_property);
+        if (value.is_calculated())
+            return max(CSSPixels { 0 },
+                value.as_calculated().resolve_length({ .length_resolution_context = CSS::Length::ResolutionContext::for_layout_node(*this) })->to_px(*this));
+        if (value.is_length())
+            return value.as_length().length().to_px(*this);
+        if (value.is_keyword()) {
+            // https://www.w3.org/TR/css-backgrounds-3/#valdef-line-width-thin
+            switch (value.to_keyword()) {
+            case CSS::Keyword::Thin:
+                return 1;
+            case CSS::Keyword::Medium:
+                return 3;
+            case CSS::Keyword::Thick:
+                return 5;
+            default:
+                VERIFY_NOT_REACHED();
+            }
+        }
+        VERIFY_NOT_REACHED();
+    };
+
     auto do_border_style = [&](CSS::BorderData& border, CSS::PropertyID width_property, CSS::PropertyID color_property, CSS::PropertyID style_property) {
         // FIXME: The default border color value is `currentcolor`, but since we can't resolve that easily,
         //        we just manually grab the value from `color`. This makes it dependent on `color` being
@@ -740,30 +772,7 @@ void NodeWithStyle::apply_style(CSS::ComputedProperties const& computed_style)
         if (border.line_style == CSS::LineStyle::None || border.line_style == CSS::LineStyle::Hidden) {
             border.width = 0;
         } else {
-            auto resolve_border_width = [&]() -> CSSPixels {
-                auto const& value = computed_style.property(width_property);
-                if (value.is_calculated())
-                    return max(CSSPixels { 0 },
-                        value.as_calculated().resolve_length({ .length_resolution_context = CSS::Length::ResolutionContext::for_layout_node(*this) })->to_px(*this));
-                if (value.is_length())
-                    return value.as_length().length().to_px(*this);
-                if (value.is_keyword()) {
-                    // https://www.w3.org/TR/css-backgrounds-3/#valdef-line-width-thin
-                    switch (value.to_keyword()) {
-                    case CSS::Keyword::Thin:
-                        return 1;
-                    case CSS::Keyword::Medium:
-                        return 3;
-                    case CSS::Keyword::Thick:
-                        return 5;
-                    default:
-                        VERIFY_NOT_REACHED();
-                    }
-                }
-                VERIFY_NOT_REACHED();
-            };
-
-            border.width = snap_a_length_as_a_border_width(document().page().client().device_pixels_per_css_pixel(), resolve_border_width());
+            border.width = snap_a_length_as_a_border_width(document().page().client().device_pixels_per_css_pixel(), resolve_border_width(width_property));
         }
     };
 
@@ -777,8 +786,13 @@ void NodeWithStyle::apply_style(CSS::ComputedProperties const& computed_style)
     if (auto const& outline_offset = computed_style.property(CSS::PropertyID::OutlineOffset); outline_offset.is_length())
         computed_values.set_outline_offset(outline_offset.as_length().length());
     computed_values.set_outline_style(computed_style.outline_style());
-    if (auto const& outline_width = computed_style.property(CSS::PropertyID::OutlineWidth); outline_width.is_length())
-        computed_values.set_outline_width(outline_width.as_length().length());
+
+    CSSPixels resolved_outline_width = 0;
+    if (computed_values.outline_style() != CSS::OutlineStyle::None)
+        resolved_outline_width = max(CSSPixels { 0 }, resolve_border_width(CSS::PropertyID::OutlineWidth));
+
+    auto snapped_outline_width = snap_a_length_as_a_border_width(document().page().client().device_pixels_per_css_pixel(), resolved_outline_width);
+    computed_values.set_outline_width(CSS::Length::make_px(snapped_outline_width));
 
     computed_values.set_grid_auto_columns(computed_style.grid_auto_columns());
     computed_values.set_grid_auto_rows(computed_style.grid_auto_rows());
@@ -1265,6 +1279,36 @@ void NodeWithStyleAndBoxModelMetrics::visit_edges(Cell::Visitor& visitor)
 {
     Base::visit_edges(visitor);
     visitor.visit(m_continuation_of_node);
+}
+
+void Node::set_needs_layout_update(DOM::SetNeedsLayoutReason reason)
+{
+    if (m_needs_layout_update)
+        return;
+
+    if constexpr (UPDATE_LAYOUT_DEBUG) {
+        // NOTE: We check some conditions here to avoid debug spam in documents that don't do layout.
+        auto navigable = this->navigable();
+        if (navigable && navigable->active_document() == &document())
+            dbgln_if(UPDATE_LAYOUT_DEBUG, "NEED LAYOUT {}", DOM::to_string(reason));
+    }
+
+    m_needs_layout_update = true;
+
+    // Mark any anonymous children generated by this node for layout update.
+    // NOTE: if this node generated an anonymous parent, all ancestors are indiscriminately marked below.
+    for_each_child_of_type<Box>([&](Box& child) {
+        if (child.is_anonymous() && !is<TableWrapper>(child)) {
+            child.m_needs_layout_update = true;
+        }
+        return IterationDecision::Continue;
+    });
+
+    for (auto* ancestor = parent(); ancestor; ancestor = ancestor->parent()) {
+        if (ancestor->m_needs_layout_update)
+            break;
+        ancestor->m_needs_layout_update = true;
+    }
 }
 
 }

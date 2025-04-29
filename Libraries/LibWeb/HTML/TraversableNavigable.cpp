@@ -53,12 +53,17 @@ TraversableNavigable::TraversableNavigable(GC::Ref<Page> page)
     , m_session_history_traversal_queue(vm().heap().allocate<SessionHistoryTraversalQueue>())
 {
     auto display_list_player_type = page->client().display_list_player_type();
+    OwnPtr<Painting::DisplayListPlayerSkia> skia_player;
     if (display_list_player_type == DisplayListPlayerType::SkiaGPUIfAvailable) {
         m_skia_backend_context = get_skia_backend_context();
-        m_skia_player = make<Painting::DisplayListPlayerSkia>(m_skia_backend_context);
+        skia_player = make<Painting::DisplayListPlayerSkia>(m_skia_backend_context);
     } else {
-        m_skia_player = make<Painting::DisplayListPlayerSkia>();
+        skia_player = make<Painting::DisplayListPlayerSkia>();
     }
+
+    m_rendering_thread.set_skia_player(move(skia_player));
+    m_rendering_thread.set_skia_backend_context(m_skia_backend_context);
+    m_rendering_thread.start(display_list_player_type);
 }
 
 TraversableNavigable::~TraversableNavigable() = default;
@@ -1395,47 +1400,16 @@ void TraversableNavigable::set_viewport_size(CSSPixelSize size)
     Navigable::set_viewport_size(size);
 
     // Invalidate the surface cache if the traversable changed size.
-    m_bitmap_to_surface.clear();
+    m_rendering_thread.clear_bitmap_to_surface_cache();
 }
 
-NonnullRefPtr<Gfx::PaintingSurface> TraversableNavigable::painting_surface_for_backing_store(Painting::BackingStore& backing_store)
-{
-    auto& bitmap = backing_store.bitmap();
-    auto cached_surface = m_bitmap_to_surface.find(&bitmap);
-    if (cached_surface != m_bitmap_to_surface.end())
-        return cached_surface->value;
-
-    RefPtr<Gfx::PaintingSurface> new_surface;
-    if (page().client().display_list_player_type() == DisplayListPlayerType::SkiaGPUIfAvailable && m_skia_backend_context) {
-#ifdef USE_VULKAN
-        // Vulkan: Try to create an accelerated surface.
-        new_surface = Gfx::PaintingSurface::create_with_size(m_skia_backend_context, backing_store.size(), Gfx::BitmapFormat::BGRA8888, Gfx::AlphaType::Premultiplied);
-        new_surface->on_flush = [&bitmap = bitmap](auto& surface) { surface.read_into_bitmap(bitmap); };
-#endif
-#ifdef AK_OS_MACOS
-        // macOS: Wrap an IOSurface if available.
-        if (is<Painting::IOSurfaceBackingStore>(backing_store)) {
-            auto& iosurface_backing_store = static_cast<Painting::IOSurfaceBackingStore&>(backing_store);
-            new_surface = Gfx::PaintingSurface::wrap_iosurface(iosurface_backing_store.iosurface_handle(), *m_skia_backend_context);
-        }
-#endif
-    }
-
-    // CPU and fallback: wrap the backing store bitmap directly.
-    if (!new_surface)
-        new_surface = Gfx::PaintingSurface::wrap_bitmap(bitmap);
-
-    m_bitmap_to_surface.set(&bitmap, *new_surface);
-    return *new_surface;
-}
-
-void TraversableNavigable::paint(DevicePixelRect const& content_rect, Painting::BackingStore& target, PaintOptions paint_options)
+RefPtr<Painting::DisplayList> TraversableNavigable::record_display_list(DevicePixelRect const& content_rect, PaintOptions paint_options)
 {
     m_needs_repaint = false;
 
     auto document = active_document();
     if (!document)
-        return;
+        return {};
 
     for (auto& navigable : all_navigables()) {
         if (auto active_document = navigable->active_document(); active_document && active_document->paintable())
@@ -1447,13 +1421,13 @@ void TraversableNavigable::paint(DevicePixelRect const& content_rect, Painting::
     paint_config.should_show_line_box_borders = paint_options.should_show_line_box_borders;
     paint_config.has_focus = paint_options.has_focus;
     paint_config.canvas_fill_rect = Gfx::IntRect { {}, content_rect.size() };
-    auto display_list = document->record_display_list(paint_config);
-    if (!display_list)
-        return;
+    return document->record_display_list(paint_config);
+}
 
-    auto painting_surface = painting_surface_for_backing_store(target);
-    m_skia_player->set_surface(painting_surface);
-    m_skia_player->execute(*display_list);
+void TraversableNavigable::start_display_list_rendering(NonnullRefPtr<Painting::DisplayList> display_list, NonnullRefPtr<Painting::BackingStore> backing_store, Function<void()>&& callback)
+{
+    auto scroll_state_snapshot = active_document()->paintable()->scroll_state().snapshot();
+    m_rendering_thread.enqueue_rendering_task(move(display_list), move(scroll_state_snapshot), move(backing_store), move(callback));
 }
 
 }

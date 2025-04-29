@@ -35,13 +35,30 @@ static bool command_is_clip_or_mask(Command const& command)
         });
 }
 
-void DisplayListPlayer::execute(DisplayList& display_list)
+void DisplayListPlayer::execute(DisplayList& display_list, ScrollStateSnapshot const& scroll_state, RefPtr<Gfx::PaintingSurface> surface)
 {
+    if (surface) {
+        surface->lock_context();
+    }
+    execute_impl(display_list, scroll_state, surface);
+    if (surface) {
+        surface->unlock_context();
+    }
+}
+
+void DisplayListPlayer::execute_impl(DisplayList& display_list, ScrollStateSnapshot const& scroll_state, RefPtr<Gfx::PaintingSurface> surface)
+{
+    if (surface)
+        m_surfaces.append(*surface);
+    ScopeGuard guard = [&surfaces = m_surfaces, pop_surface_from_stack = !!surface] {
+        if (pop_surface_from_stack)
+            (void)surfaces.take_last();
+    };
+
     auto const& commands = display_list.commands();
-    auto const& scroll_state = display_list.scroll_state();
     auto device_pixels_per_css_pixel = display_list.device_pixels_per_css_pixel();
 
-    VERIFY(m_surface);
+    VERIFY(!m_surfaces.is_empty());
 
     for (size_t command_index = 0; command_index < commands.size(); command_index++) {
         auto scroll_frame_id = commands[command_index].scroll_frame_id;
@@ -52,10 +69,10 @@ void DisplayListPlayer::execute(DisplayList& display_list)
             auto scroll_offset = scroll_state.own_offset_for_frame_with_id(paint_scroll_bar.scroll_frame_id);
             if (paint_scroll_bar.vertical) {
                 auto offset = scroll_offset.y() * paint_scroll_bar.scroll_size;
-                paint_scroll_bar.rect.translate_by(0, -offset.to_int() * device_pixels_per_css_pixel);
+                paint_scroll_bar.thumb_rect.translate_by(0, -offset.to_int() * device_pixels_per_css_pixel);
             } else {
                 auto offset = scroll_offset.x() * paint_scroll_bar.scroll_size;
-                paint_scroll_bar.rect.translate_by(-offset.to_int() * device_pixels_per_css_pixel, 0);
+                paint_scroll_bar.thumb_rect.translate_by(-offset.to_int() * device_pixels_per_css_pixel, 0);
             }
         }
 
@@ -97,6 +114,7 @@ void DisplayListPlayer::execute(DisplayList& display_list)
         else HANDLE_COMMAND(DrawRepeatedImmutableBitmap, draw_repeated_immutable_bitmap)
         else HANDLE_COMMAND(AddClipRect, add_clip_rect)
         else HANDLE_COMMAND(Save, save)
+        else HANDLE_COMMAND(SaveLayer, save_layer)
         else HANDLE_COMMAND(Restore, restore)
         else HANDLE_COMMAND(Translate, translate)
         else HANDLE_COMMAND(PushStackingContext, push_stacking_context)
@@ -131,7 +149,8 @@ void DisplayListPlayer::execute(DisplayList& display_list)
         // clang-format on
     }
 
-    flush();
+    if (surface)
+        flush();
 }
 
 }

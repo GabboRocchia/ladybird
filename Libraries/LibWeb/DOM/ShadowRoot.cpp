@@ -33,8 +33,8 @@ void ShadowRoot::finalize()
 
 void ShadowRoot::initialize(JS::Realm& realm)
 {
-    Base::initialize(realm);
     WEB_SET_PROTOTYPE_FOR_INTERFACE(ShadowRoot);
+    Base::initialize(realm);
 }
 
 // https://dom.spec.whatwg.org/#dom-shadowroot-onslotchange
@@ -182,6 +182,13 @@ WebIDL::ExceptionOr<Vector<GC::Ref<Animations::Animation>>> ShadowRoot::get_anim
         return IterationDecision::Continue;
     }));
     return relevant_animations;
+}
+
+ElementByIdMap& ShadowRoot::element_by_id() const
+{
+    if (!m_element_by_id)
+        m_element_by_id = make<ElementByIdMap>();
+    return *m_element_by_id;
 }
 
 }

@@ -8,37 +8,20 @@
 #pragma once
 
 #include <AK/Error.h>
-#include <AK/RefCounted.h>
-#include <AK/RefPtr.h>
 #include <AK/Vector.h>
-#include <LibCore/Forward.h>
-#include <LibCore/System.h>
 #include <LibIPC/Transport.h>
 
 namespace IPC {
 
-class AutoCloseFileDescriptor : public RefCounted<AutoCloseFileDescriptor> {
-public:
-    AutoCloseFileDescriptor(int fd)
-        : m_fd(fd)
-    {
-    }
-
-    ~AutoCloseFileDescriptor()
-    {
-        if (m_fd != -1)
-            (void)Core::System::close(m_fd);
-    }
-
-    int value() const { return m_fd; }
-
-private:
-    int m_fd;
-};
-
 class MessageBuffer {
 public:
     MessageBuffer();
+
+    MessageBuffer(Vector<u8, 1024> data, Vector<NonnullRefPtr<AutoCloseFileDescriptor>, 1> fds)
+        : m_data(move(data))
+        , m_fds(move(fds))
+    {
+    }
 
     ErrorOr<void> extend_data_capacity(size_t capacity);
     ErrorOr<void> append_data(u8 const* values, size_t count);
@@ -46,6 +29,9 @@ public:
     ErrorOr<void> append_file_descriptor(int fd);
 
     ErrorOr<void> transfer_message(Transport& transport);
+
+    auto const& data() const { return m_data; }
+    auto take_fds() { return move(m_fds); }
 
 private:
     Vector<u8, 1024> m_data;

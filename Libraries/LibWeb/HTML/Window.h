@@ -16,6 +16,7 @@
 #include <LibWeb/Bindings/WindowGlobalMixin.h>
 #include <LibWeb/DOM/EventTarget.h>
 #include <LibWeb/Forward.h>
+#include <LibWeb/HTML/BarProp.h>
 #include <LibWeb/HTML/CrossOrigin/CrossOriginPropertyDescriptorMap.h>
 #include <LibWeb/HTML/GlobalEventHandlers.h>
 #include <LibWeb/HTML/MimeType.h>
@@ -148,7 +149,7 @@ public:
     // https://html.spec.whatwg.org/multipage/interaction.html#history-action-activation
     bool has_history_action_activation() const;
 
-    WebIDL::ExceptionOr<void> initialize_web_interfaces(Badge<WindowEnvironmentSettingsObject>, URL::URL const&);
+    WebIDL::ExceptionOr<void> initialize_web_interfaces(Badge<WindowEnvironmentSettingsObject>);
 
     Vector<GC::Ref<Plugin>> pdf_viewer_plugin_objects();
     Vector<GC::Ref<MimeType>> pdf_viewer_mime_type_objects();
@@ -172,6 +173,15 @@ public:
     void stop();
     void focus();
     void blur();
+
+    // For historical reasons, the Window interface had some properties that represented the visibility of certain web browser interface elements.
+    // For privacy and interoperability reasons, those properties now return values that represent whether the Window's browsing context's is popup property is true or false.
+    GC::Ref<BarProp const> locationbar();
+    GC::Ref<BarProp const> menubar();
+    GC::Ref<BarProp const> personalbar();
+    GC::Ref<BarProp const> scrollbars();
+    GC::Ref<BarProp const> statusbar();
+    GC::Ref<BarProp const> toolbar();
 
     GC::Ref<WindowProxy> frames() const;
     u32 length();
@@ -259,8 +269,12 @@ public:
 private:
     explicit Window(JS::Realm&);
 
+    virtual bool is_window_or_worker_global_scope_mixin() const final { return true; }
+
     virtual void visit_edges(Cell::Visitor&) override;
     virtual void finalize() override;
+
+    virtual bool is_html_window() const override { return true; }
 
     // ^HTML::GlobalEventHandlers
     virtual GC::Ptr<DOM::EventTarget> global_event_handlers_to_event_target(FlyString const&) override { return *this; }
@@ -332,8 +346,18 @@ private:
     // https://html.spec.whatwg.org/multipage/nav-history-apis.html#dom-window-status
     // When the Window object is created, the attribute must be set to the empty string. It does not do anything else.
     String m_status;
+
+    GC::Ptr<BarProp const> m_locationbar;
+    GC::Ptr<BarProp const> m_menubar;
+    GC::Ptr<BarProp const> m_personalbar;
+    GC::Ptr<BarProp const> m_scrollbars;
+    GC::Ptr<BarProp const> m_statusbar;
+    GC::Ptr<BarProp const> m_toolbar;
 };
 
 void run_animation_frame_callbacks(DOM::Document&, double now);
 
 }
+
+template<>
+inline bool JS::Object::fast_is<Web::HTML::Window>() const { return is_html_window(); }

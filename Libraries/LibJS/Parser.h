@@ -39,6 +39,7 @@ struct FunctionNodeParseOptions {
         IsGeneratorFunction = 1 << 6,
         IsAsyncFunction = 1 << 7,
         HasDefaultExportName = 1 << 8,
+        IsConstructor = 1 << 9,
     };
 };
 
@@ -59,7 +60,7 @@ public:
 
     template<typename FunctionNodeType>
     NonnullRefPtr<FunctionNodeType> parse_function_node(u16 parse_options = FunctionNodeParseOptions::CheckForFunctionAndName, Optional<Position> const& function_start = {});
-    Vector<FunctionParameter> parse_formal_parameters(int& function_length, u16 parse_options = 0);
+    NonnullRefPtr<FunctionParameters const> parse_formal_parameters(int& function_length, u16 parse_options = 0);
 
     enum class AllowDuplicates {
         Yes,
@@ -87,7 +88,7 @@ public:
 
     NonnullRefPtr<Statement const> parse_statement(AllowLabelledFunction allow_labelled_function = AllowLabelledFunction::No);
     NonnullRefPtr<BlockStatement const> parse_block_statement();
-    NonnullRefPtr<FunctionBody const> parse_function_body(Vector<FunctionParameter> const& parameters, FunctionKind function_kind, FunctionParsingInsights&);
+    NonnullRefPtr<FunctionBody const> parse_function_body(NonnullRefPtr<FunctionParameters const>, FunctionKind function_kind, FunctionParsingInsights&);
     NonnullRefPtr<ReturnStatement const> parse_return_statement();
 
     enum class IsForLoopVariableDeclaration {
@@ -211,7 +212,7 @@ public:
     // Needs to mess with m_state, and we're not going to expose a non-const getter for that :^)
     friend ThrowCompletionOr<GC::Ref<ECMAScriptFunctionObject>> FunctionConstructor::create_dynamic_function(VM&, FunctionObject&, FunctionObject*, FunctionKind, ReadonlySpan<String> parameter_args, String const& body_arg);
 
-    static Parser parse_function_body_from_string(ByteString const& body_string, u16 parse_options, Vector<FunctionParameter> const& parameters, FunctionKind kind, FunctionParsingInsights&);
+    static Parser parse_function_body_from_string(ByteString const& body_string, u16 parse_options, NonnullRefPtr<FunctionParameters const>, FunctionKind kind, FunctionParsingInsights&);
 
 private:
     friend class ScopePusher;
@@ -319,7 +320,6 @@ private:
         bool initiated_by_eval { false };
         bool in_eval_function_context { false }; // This controls if we allow new.target or not. Note that eval("return") is not allowed, so we have to have a separate state variable for eval.
         bool in_formal_parameter_context { false };
-        bool in_catch_parameter_context { false };
         bool in_generator_function_context { false };
         bool await_expression_is_valid { false };
         bool in_arrow_function_context { false };

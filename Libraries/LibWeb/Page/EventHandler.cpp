@@ -12,6 +12,7 @@
 #include <LibWeb/HTML/CloseWatcherManager.h>
 #include <LibWeb/HTML/Focus.h>
 #include <LibWeb/HTML/HTMLAnchorElement.h>
+#include <LibWeb/HTML/HTMLDialogElement.h>
 #include <LibWeb/HTML/HTMLFormElement.h>
 #include <LibWeb/HTML/HTMLIFrameElement.h>
 #include <LibWeb/HTML/HTMLImageElement.h>
@@ -66,14 +67,20 @@ static DOM::Node* input_control_associated_with_ancestor_label_element(Painting:
 
 static bool parent_element_for_event_dispatch(Painting::Paintable& paintable, GC::Ptr<DOM::Node>& node, Layout::Node*& layout_node)
 {
+    layout_node = &paintable.layout_node();
+    if (layout_node->is_generated_for_backdrop_pseudo_element()) {
+        node = layout_node->pseudo_element_generator();
+        layout_node = node->layout_node();
+    }
+
     auto* current_ancestor_node = node.ptr();
     do {
-        if (is<HTML::FormAssociatedElement>(current_ancestor_node) && !dynamic_cast<HTML::FormAssociatedElement*>(current_ancestor_node)->enabled()) {
+        auto const* form_associated_element = as_if<HTML::FormAssociatedElement>(current_ancestor_node);
+        if (form_associated_element && !form_associated_element->enabled()) {
             return false;
         }
     } while ((current_ancestor_node = current_ancestor_node->parent()));
 
-    layout_node = &paintable.layout_node();
     while (layout_node && node && !node->is_element() && layout_node->parent()) {
         layout_node = layout_node->parent();
         if (layout_node->is_anonymous())
@@ -147,7 +154,7 @@ static Gfx::Cursor resolve_cursor(Layout::NodeWithStyle const& layout_node, Vect
                     return Gfx::StandardCursor::None;
                 }
             },
-            [&layout_node](NonnullRefPtr<CSS::CursorStyleValue> const& cursor_style_value) -> Optional<Gfx::Cursor> {
+            [&layout_node](NonnullRefPtr<CSS::CursorStyleValue const> const& cursor_style_value) -> Optional<Gfx::Cursor> {
                 if (auto image_cursor = cursor_style_value->make_image_cursor(layout_node); image_cursor.has_value())
                     return image_cursor.release_value();
                 return {};
@@ -333,6 +340,18 @@ static void set_user_selection(GC::Ptr<DOM::Node> anchor_node, unsigned anchor_o
     (void)selection->set_base_and_extent(*anchor_node, anchor_offset, *focus_node, focus_offset);
 }
 
+// https://html.spec.whatwg.org/multipage/interactive-elements.html#run-light-dismiss-activities
+static void light_dismiss_activities(UIEvents::PointerEvent const& event, const GC::Ptr<DOM::Node> target)
+{
+    // To run light dismiss activities, given a PointerEvent event:
+
+    // 1. Run light dismiss open popovers with event.
+    HTML::HTMLElement::light_dismiss_open_popovers(event, target);
+
+    // 2. Run light dismiss open dialogs with event.
+    HTML::HTMLDialogElement::light_dismiss_open_dialogs(event, target);
+}
+
 EventHandler::EventHandler(Badge<HTML::Navigable>, HTML::Navigable& navigable)
     : m_navigable(navigable)
     , m_drag_and_drop_event_handler(make<DragAndDropEventHandler>())
@@ -475,7 +494,9 @@ EventResult EventHandler::handle_mouseup(CSSPixelPoint viewport_position, CSSPix
 
             auto page_offset = compute_mouse_event_page_offset(viewport_position);
             auto offset = compute_mouse_event_offset(page_offset, *layout_node->first_paintable());
-            node->dispatch_event(UIEvents::PointerEvent::create_from_platform_event(node->realm(), UIEvents::EventNames::pointerup, screen_position, page_offset, viewport_position, offset, {}, button, buttons, modifiers).release_value_but_fixme_should_propagate_errors());
+            auto pointer_event = UIEvents::PointerEvent::create_from_platform_event(node->realm(), UIEvents::EventNames::pointerup, screen_position, page_offset, viewport_position, offset, {}, button, buttons, modifiers).release_value_but_fixme_should_propagate_errors();
+            light_dismiss_activities(pointer_event, node);
+            node->dispatch_event(pointer_event);
             node->dispatch_event(UIEvents::MouseEvent::create_from_platform_event(node->realm(), UIEvents::EventNames::mouseup, screen_position, page_offset, viewport_position, offset, {}, button, buttons, modifiers).release_value_but_fixme_should_propagate_errors());
             handled_event = EventResult::Handled;
 
@@ -550,7 +571,7 @@ EventResult EventHandler::handle_mouseup(CSSPixelPoint viewport_position, CSSPix
             }
 
             if (auto* input_control = input_control_associated_with_ancestor_label_element(*paintable)) {
-                if (button == UIEvents::MouseButton::Primary) {
+                if (button == UIEvents::MouseButton::Primary && input_control != node) {
                     input_control->dispatch_event(UIEvents::MouseEvent::create_from_platform_event(node->realm(), UIEvents::EventNames::click, screen_position, page_offset, viewport_position, offset, {}, button, buttons, modifiers).release_value_but_fixme_should_propagate_errors());
                 }
             }
@@ -623,7 +644,9 @@ EventResult EventHandler::handle_mousedown(CSSPixelPoint viewport_position, CSSP
         m_mousedown_target = node.ptr();
         auto page_offset = compute_mouse_event_page_offset(viewport_position);
         auto offset = compute_mouse_event_offset(page_offset, *layout_node->first_paintable());
-        node->dispatch_event(UIEvents::PointerEvent::create_from_platform_event(node->realm(), UIEvents::EventNames::pointerdown, screen_position, page_offset, viewport_position, offset, {}, button, buttons, modifiers).release_value_but_fixme_should_propagate_errors());
+        auto pointer_event = UIEvents::PointerEvent::create_from_platform_event(node->realm(), UIEvents::EventNames::pointerdown, screen_position, page_offset, viewport_position, offset, {}, button, buttons, modifiers).release_value_but_fixme_should_propagate_errors();
+        light_dismiss_activities(pointer_event, node);
+        node->dispatch_event(pointer_event);
         node->dispatch_event(UIEvents::MouseEvent::create_from_platform_event(node->realm(), UIEvents::EventNames::mousedown, screen_position, page_offset, viewport_position, offset, {}, button, buttons, modifiers).release_value_but_fixme_should_propagate_errors());
     }
 

@@ -43,7 +43,7 @@ bool is_compatible_property_descriptor(bool extensible, PropertyDescriptor const
 bool validate_and_apply_property_descriptor(Object*, PropertyKey const&, bool extensible, PropertyDescriptor const&, Optional<PropertyDescriptor> const& current);
 ThrowCompletionOr<Object*> get_prototype_from_constructor(VM&, FunctionObject const& constructor, GC::Ref<Object> (Intrinsics::*intrinsic_default_prototype)());
 Object* create_unmapped_arguments_object(VM&, ReadonlySpan<Value> arguments);
-Object* create_mapped_arguments_object(VM&, FunctionObject&, Vector<FunctionParameter> const&, ReadonlySpan<Value> arguments, Environment&);
+Object* create_mapped_arguments_object(VM&, FunctionObject&, NonnullRefPtr<FunctionParameters const> const&, ReadonlySpan<Value> arguments, Environment&);
 
 // 2.1.1 DisposeCapability Records, https://tc39.es/proposal-explicit-resource-management/#sec-disposecapability-records
 struct DisposeCapability {
@@ -241,7 +241,7 @@ ThrowCompletionOr<GroupsType> group_by(VM& vm, Value items, Value callback_funct
 
         // f. IfAbruptCloseIterator(key, iteratorRecord).
         if (key.is_error())
-            return Completion { *TRY(iterator_close(vm, iterator_record, key.release_error())) };
+            return Completion { TRY(iterator_close(vm, iterator_record, key.release_error())) };
 
         // g. If keyCoercion is property, then
         if constexpr (IsSame<KeyType, PropertyKey>) {
@@ -250,7 +250,7 @@ ThrowCompletionOr<GroupsType> group_by(VM& vm, Value items, Value callback_funct
 
             // ii. IfAbruptCloseIterator(key, iteratorRecord).
             if (property_key.is_error())
-                return Completion { *TRY(iterator_close(vm, iterator_record, property_key.release_error())) };
+                return Completion { TRY(iterator_close(vm, iterator_record, property_key.release_error())) };
 
             add_value_to_keyed_group(vm, groups, property_key.release_value(), value);
         }

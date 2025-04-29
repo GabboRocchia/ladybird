@@ -24,7 +24,7 @@ public:
     virtual ~WebViewBridge() override;
 
     virtual void initialize_client(CreateNewClient = CreateNewClient::Yes) override;
-    void initialize_client_as_child(WebViewBridge const& parent, u64 page_index);
+    void initialize_client_as_child(WebViewBridge& parent, u64 page_index);
 
     float device_pixel_ratio() const { return m_device_pixel_ratio; }
     void set_device_pixel_ratio(float device_pixel_ratio);
@@ -41,10 +41,8 @@ public:
     void enqueue_input_event(Web::DragEvent);
     void enqueue_input_event(Web::KeyEvent);
 
-    void set_enable_autoplay(bool enabled);
-
     struct Paintable {
-        Gfx::Bitmap& bitmap;
+        Gfx::Bitmap const& bitmap;
         Gfx::IntSize bitmap_size;
     };
     Optional<Paintable> paintable();

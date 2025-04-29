@@ -23,10 +23,9 @@ public:
 
     // Table 5: Additional Essential Internal Methods of Function Objects, https://tc39.es/ecma262/#table-additional-essential-internal-methods-of-function-objects
 
-    virtual ThrowCompletionOr<Value> internal_call(Value this_argument, ReadonlySpan<Value> arguments_list) = 0;
+    virtual ThrowCompletionOr<void> get_stack_frame_size([[maybe_unused]] size_t& registers_and_constants_and_locals_count, [[maybe_unused]] size_t& argument_count) { return {}; }
+    virtual ThrowCompletionOr<Value> internal_call(ExecutionContext&, Value this_argument) = 0;
     virtual ThrowCompletionOr<GC::Ref<Object>> internal_construct([[maybe_unused]] ReadonlySpan<Value> arguments_list, [[maybe_unused]] FunctionObject& new_target) { VERIFY_NOT_REACHED(); }
-
-    virtual FlyString const& name() const = 0;
 
     void set_function_name(Variant<PropertyKey, PrivateName> const& name_arg, Optional<StringView> const& prefix = {});
     void set_function_length(double length);
@@ -40,14 +39,19 @@ public:
 
     virtual Vector<FlyString> const& local_variables_names() const { VERIFY_NOT_REACHED(); }
 
-    virtual Vector<FunctionParameter> const& formal_parameters() const { VERIFY_NOT_REACHED(); }
+    virtual FunctionParameters const& formal_parameters() const { VERIFY_NOT_REACHED(); }
 
 protected:
     explicit FunctionObject(Realm&, Object* prototype, MayInterfereWithIndexedPropertyAccess = MayInterfereWithIndexedPropertyAccess::No);
     explicit FunctionObject(Object& prototype, MayInterfereWithIndexedPropertyAccess = MayInterfereWithIndexedPropertyAccess::No);
 
+    [[nodiscard]] GC::Ref<PrimitiveString> make_function_name(Variant<PropertyKey, PrivateName> const&, Optional<StringView> const& prefix);
+
 private:
     virtual bool is_function() const override { return true; }
 };
+
+template<>
+inline bool Object::fast_is<FunctionObject>() const { return is_function(); }
 
 }

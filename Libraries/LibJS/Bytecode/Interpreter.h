@@ -33,7 +33,7 @@ public:
     ThrowCompletionOr<Value> run(Script&, GC::Ptr<Environment> lexical_environment_override = nullptr);
     ThrowCompletionOr<Value> run(SourceTextModule&);
 
-    ThrowCompletionOr<Value> run(Bytecode::Executable& executable, Optional<size_t> entry_point = {}, Value initial_accumulator_value = {})
+    ThrowCompletionOr<Value> run(Bytecode::Executable& executable, Optional<size_t> entry_point = {}, Value initial_accumulator_value = js_special_empty_value())
     {
         auto result_and_return_register = run_executable(executable, entry_point, initial_accumulator_value);
         return move(result_and_return_register.value);
@@ -43,17 +43,17 @@ public:
         ThrowCompletionOr<Value> value;
         Value return_register_value;
     };
-    ResultAndReturnRegister run_executable(Bytecode::Executable&, Optional<size_t> entry_point, Value initial_accumulator_value = {});
+    ResultAndReturnRegister run_executable(Bytecode::Executable&, Optional<size_t> entry_point, Value initial_accumulator_value = js_special_empty_value());
 
     ALWAYS_INLINE Value& accumulator() { return reg(Register::accumulator()); }
     ALWAYS_INLINE Value& saved_return_value() { return reg(Register::saved_return_value()); }
     Value& reg(Register const& r)
     {
-        return m_registers_and_constants_and_locals.data()[r.index()];
+        return m_registers_and_constants_and_locals_arguments.data()[r.index()];
     }
     Value reg(Register const& r) const
     {
-        return m_registers_and_constants_and_locals.data()[r.index()];
+        return m_registers_and_constants_and_locals_arguments.data()[r.index()];
     }
 
     [[nodiscard]] Value get(Operand) const;
@@ -63,7 +63,7 @@ public:
     void do_return(Value value)
     {
         reg(Register::return_value()) = value;
-        reg(Register::exception()) = {};
+        reg(Register::exception()) = js_special_empty_value();
     }
 
     void enter_unwind_context();
@@ -76,7 +76,6 @@ public:
 
     Executable& current_executable() { return *m_current_executable; }
     Executable const& current_executable() const { return *m_current_executable; }
-    Optional<size_t> program_counter() const { return m_program_counter; }
     Span<Value> allocate_argument_values(size_t argument_count)
     {
         m_argument_values_buffer.resize_and_keep_capacity(argument_count);
@@ -100,9 +99,7 @@ private:
     GC::Ptr<Realm> m_realm { nullptr };
     GC::Ptr<Object> m_global_object { nullptr };
     GC::Ptr<DeclarativeEnvironment> m_global_declarative_environment { nullptr };
-    Optional<size_t&> m_program_counter;
-    Span<Value> m_arguments;
-    Span<Value> m_registers_and_constants_and_locals;
+    Span<Value> m_registers_and_constants_and_locals_arguments;
     Vector<Value> m_argument_values_buffer;
     ExecutionContext* m_running_execution_context { nullptr };
 };

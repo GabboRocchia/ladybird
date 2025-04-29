@@ -7,8 +7,10 @@
 #include <AK/TemporaryChange.h>
 #include <LibJS/Bytecode/Generator.h>
 #include <LibJS/Bytecode/Interpreter.h>
+#include <LibJS/Runtime/CompletionCell.h>
 #include <LibJS/Runtime/GeneratorObject.h>
 #include <LibJS/Runtime/GeneratorPrototype.h>
+#include <LibJS/Runtime/GeneratorResult.h>
 #include <LibJS/Runtime/GlobalObject.h>
 #include <LibJS/Runtime/Iterator.h>
 
@@ -80,17 +82,15 @@ ThrowCompletionOr<Value> GeneratorObject::execute(VM& vm, Completion const& comp
 {
     // Loosely based on step 4 of https://tc39.es/ecma262/#sec-generatorstart mixed with https://tc39.es/ecma262/#sec-generatoryield at the end.
 
-    VERIFY(completion.value().has_value());
-
-    auto generated_value = [&vm](Value value) -> Value {
-        if (value.is_object())
-            return value.as_object().get_without_side_effects(vm.names.result);
-        return value.is_empty() ? js_undefined() : value;
+    auto generated_value = [](Value value) -> Value {
+        if (value.is_cell())
+            return static_cast<GeneratorResult const&>(value.as_cell()).result();
+        return value.is_special_empty_value() ? js_undefined() : value;
     };
 
     auto generated_continuation = [&](Value value) -> Optional<size_t> {
-        if (value.is_object()) {
-            auto number_value = value.as_object().get_without_side_effects(vm.names.continuation);
+        if (value.is_cell()) {
+            auto number_value = static_cast<GeneratorResult const&>(value.as_cell()).continuation();
             if (number_value.is_null())
                 return {};
             return static_cast<u64>(number_value.as_double());
@@ -98,10 +98,7 @@ ThrowCompletionOr<Value> GeneratorObject::execute(VM& vm, Completion const& comp
         return {};
     };
 
-    auto& realm = *vm.current_realm();
-    auto completion_object = Object::create(realm, nullptr);
-    completion_object->define_direct_property(vm.names.type, Value(to_underlying(completion.type())), default_attributes);
-    completion_object->define_direct_property(vm.names.value, completion.value().value(), default_attributes);
+    auto compleion_cell = heap().allocate<CompletionCell>(completion);
 
     auto& bytecode_interpreter = vm.bytecode_interpreter();
 
@@ -110,7 +107,7 @@ ThrowCompletionOr<Value> GeneratorObject::execute(VM& vm, Completion const& comp
     // We should never enter `execute` again after the generator is complete.
     VERIFY(next_block.has_value());
 
-    auto next_result = bytecode_interpreter.run_executable(*m_generating_function->bytecode_executable(), next_block, completion_object);
+    auto next_result = bytecode_interpreter.run_executable(*m_generating_function->bytecode_executable(), next_block, compleion_cell);
 
     vm.pop_execution_context();
 
@@ -168,9 +165,6 @@ ThrowCompletionOr<Value> GeneratorObject::resume(VM& vm, Value value, Optional<S
 // 27.5.3.4 GeneratorResumeAbrupt ( generator, abruptCompletion, generatorBrand ), https://tc39.es/ecma262/#sec-generatorresumeabrupt
 ThrowCompletionOr<Value> GeneratorObject::resume_abrupt(JS::VM& vm, JS::Completion abrupt_completion, Optional<StringView> const& generator_brand)
 {
-    // Not part of the spec, but the spec assumes abruptCompletion.[[Value]] is not empty.
-    VERIFY(abrupt_completion.value().has_value());
-
     // 1. Let state be ? GeneratorValidate(generator, generatorBrand).
     auto state = TRY(validate(vm, generator_brand));
 
@@ -191,7 +185,7 @@ ThrowCompletionOr<Value> GeneratorObject::resume_abrupt(JS::VM& vm, JS::Completi
         // a. If abruptCompletion.[[Type]] is return, then
         if (abrupt_completion.type() == Completion::Type::Return) {
             // i. Return CreateIterResultObject(abruptCompletion.[[Value]], true).
-            return create_iterator_result_object(vm, abrupt_completion.value().value(), true);
+            return create_iterator_result_object(vm, abrupt_completion.value(), true);
         }
 
         // b. Return ? abruptCompletion.

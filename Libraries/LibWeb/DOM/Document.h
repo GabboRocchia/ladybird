@@ -25,8 +25,8 @@
 #include <LibWeb/CSS/CSSStyleSheet.h>
 #include <LibWeb/CSS/StyleSheetList.h>
 #include <LibWeb/Cookie/Cookie.h>
-#include <LibWeb/DOM/NonElementParentNode.h>
 #include <LibWeb/DOM/ParentNode.h>
+#include <LibWeb/DOM/ShadowRoot.h>
 #include <LibWeb/HTML/BrowsingContext.h>
 #include <LibWeb/HTML/CrossOrigin/OpenerPolicy.h>
 #include <LibWeb/HTML/DocumentReadyState.h>
@@ -158,7 +158,6 @@ enum class PolicyControlledFeature : u8 {
 
 class Document
     : public ParentNode
-    , public NonElementParentNode<Document>
     , public HTML::GlobalEventHandlers {
     WEB_PLATFORM_OBJECT(Document, ParentNode);
     GC_DECLARE_ALLOCATOR(Document);
@@ -254,8 +253,9 @@ public:
 
     virtual FlyString node_name() const override { return "#document"_fly_string; }
 
-    void invalidate_style_for_elements_affected_by_hover_change(Node& old_new_hovered_common_ancestor, GC::Ptr<Node> hovered_node);
-    void set_hovered_node(Node*);
+    void invalidate_style_for_elements_affected_by_pseudo_class_change(CSS::PseudoClass, auto& element_slot, Node& old_new_common_ancestor, auto node);
+
+    void set_hovered_node(GC::Ptr<Node>);
     Node* hovered_node() { return m_hovered_node.ptr(); }
     Node const* hovered_node() const { return m_hovered_node.ptr(); }
 
@@ -428,14 +428,13 @@ public:
     Element* focused_element() { return m_focused_element.ptr(); }
     Element const* focused_element() const { return m_focused_element.ptr(); }
 
-    void set_focused_element(Element*);
+    void set_focused_element(GC::Ptr<Element>);
 
     Element const* active_element() const { return m_active_element.ptr(); }
-
-    void set_active_element(Element*);
+    void set_active_element(GC::Ptr<Element>);
 
     Element const* target_element() const { return m_target_element.ptr(); }
-    void set_target_element(Element*);
+    void set_target_element(GC::Ptr<Element>);
 
     void try_to_scroll_to_the_fragment();
     void scroll_to_the_fragment();
@@ -500,7 +499,8 @@ public:
 
     String dump_dom_tree_as_json() const;
 
-    bool has_a_style_sheet_that_is_blocking_scripts() const;
+    [[nodiscard]] bool has_a_style_sheet_that_is_blocking_scripts() const;
+    [[nodiscard]] bool has_no_style_sheet_that_is_blocking_scripts() const;
 
     bool is_fully_active() const;
     bool is_active() const;
@@ -548,6 +548,7 @@ public:
     void unregister_viewport_client(ViewportClient&);
     void inform_all_viewport_clients_about_the_current_viewport_rect();
 
+    bool has_focus_for_bindings() const;
     bool has_focus() const;
 
     bool allow_focus() const;
@@ -742,7 +743,7 @@ public:
     GC::Ptr<HTML::SessionHistoryEntry> latest_entry() const { return m_latest_entry; }
     void set_latest_entry(GC::Ptr<HTML::SessionHistoryEntry> e) { m_latest_entry = e; }
 
-    void element_id_changed(Badge<DOM::Element>, GC::Ref<DOM::Element> element);
+    void element_id_changed(Badge<DOM::Element>, GC::Ref<DOM::Element> element, Optional<FlyString> old_id);
     void element_with_id_was_added(Badge<DOM::Element>, GC::Ref<DOM::Element> element);
     void element_with_id_was_removed(Badge<DOM::Element>, GC::Ref<DOM::Element> element);
     void element_name_changed(Badge<DOM::Element>, GC::Ref<DOM::Element> element);
@@ -794,6 +795,16 @@ public:
     Vector<GC::Ref<HTML::HTMLElement>>& showing_hint_popover_list() { return m_showing_hint_popover_list; }
     Vector<GC::Ref<HTML::HTMLElement>> const& showing_auto_popover_list() const { return m_showing_auto_popover_list; }
     Vector<GC::Ref<HTML::HTMLElement>> const& showing_hint_popover_list() const { return m_showing_hint_popover_list; }
+
+    GC::Ptr<HTML::HTMLElement> topmost_auto_or_hint_popover();
+
+    void set_popover_pointerdown_target(GC::Ptr<HTML::HTMLElement> target) { m_popover_pointerdown_target = target; }
+    GC::Ptr<HTML::HTMLElement> popover_pointerdown_target() { return m_popover_pointerdown_target; }
+
+    Vector<GC::Ref<HTML::HTMLDialogElement>>& open_dialogs_list() { return m_open_dialogs_list; }
+
+    void set_dialog_pointerdown_target(GC::Ptr<HTML::HTMLDialogElement> target) { m_dialog_pointerdown_target = target; }
+    GC::Ptr<HTML::HTMLDialogElement> dialog_pointerdown_target() { return m_dialog_pointerdown_target; }
 
     size_t transition_generation() const { return m_transition_generation; }
 
@@ -895,6 +906,11 @@ public:
         m_pending_nodes_for_style_invalidation_due_to_presence_of_has.set(node.make_weak_ptr<Node>());
     }
 
+    ElementByIdMap& element_by_id() const;
+
+    auto& script_blocking_style_sheet_set() { return m_script_blocking_style_sheet_set; }
+    auto const& script_blocking_style_sheet_set() const { return m_script_blocking_style_sheet_set; }
+
 protected:
     virtual void initialize(JS::Realm&) override;
     virtual void visit_edges(Cell::Visitor&) override;
@@ -952,6 +968,7 @@ private:
     GC::Ptr<Node> m_active_favicon;
     WeakPtr<HTML::BrowsingContext> m_browsing_context;
     URL::URL m_url;
+    mutable OwnPtr<ElementByIdMap> m_element_by_id;
 
     GC::Ptr<HTML::Window> m_window;
 
@@ -1027,8 +1044,8 @@ private:
     // https://html.spec.whatwg.org/multipage/dynamic-markup-insertion.html#throw-on-dynamic-markup-insertion-counter
     u32 m_throw_on_dynamic_markup_insertion_counter { 0 };
 
-    // https://html.spec.whatwg.org/multipage/semantics.html#script-blocking-style-sheet-counter
-    u32 m_script_blocking_style_sheet_counter { 0 };
+    // https://html.spec.whatwg.org/multipage/semantics.html#script-blocking-style-sheet-set
+    HashTable<GC::Ref<DOM::Element>> m_script_blocking_style_sheet_set;
 
     GC::Ptr<HTML::History> m_history;
 
@@ -1179,7 +1196,7 @@ private:
 
     mutable GC::Ptr<WebIDL::ObservableArray> m_adopted_style_sheets;
 
-    Vector<GC::Ref<DOM::ShadowRoot>> m_shadow_roots;
+    ShadowRoot::DocumentShadowRootList m_shadow_roots;
 
     Optional<Core::DateTime> m_last_modified;
 
@@ -1195,6 +1212,11 @@ private:
 
     Vector<GC::Ref<HTML::HTMLElement>> m_showing_auto_popover_list;
     Vector<GC::Ref<HTML::HTMLElement>> m_showing_hint_popover_list;
+
+    GC::Ptr<HTML::HTMLElement> m_popover_pointerdown_target;
+
+    Vector<GC::Ref<HTML::HTMLDialogElement>> m_open_dialogs_list;
+    GC::Ptr<HTML::HTMLDialogElement> m_dialog_pointerdown_target;
 
     // https://dom.spec.whatwg.org/#document-allow-declarative-shadow-roots
     bool m_allow_declarative_shadow_roots { false };

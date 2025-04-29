@@ -34,7 +34,10 @@ NonnullRefPtr<Utf16StringImpl> Utf16StringImpl::create(Utf16Data string)
 
 NonnullRefPtr<Utf16StringImpl> Utf16StringImpl::create(StringView string)
 {
-    return create(MUST(utf8_to_utf16(string)));
+    auto result = MUST(utf8_to_utf16(string));
+    auto impl = create(move(result.data));
+    impl->m_cached_view.unsafe_set_code_point_length(result.code_point_count);
+    return impl;
 }
 
 NonnullRefPtr<Utf16StringImpl> Utf16StringImpl::create(Utf16View const& view)
@@ -42,7 +45,9 @@ NonnullRefPtr<Utf16StringImpl> Utf16StringImpl::create(Utf16View const& view)
     Utf16Data string;
     string.ensure_capacity(view.length_in_code_units());
     string.unchecked_append(view.data(), view.length_in_code_units());
-    return create(move(string));
+    auto impl = create(move(string));
+    impl->m_cached_view.unsafe_set_code_point_length(view.length_in_code_units());
+    return impl;
 }
 
 Utf16Data const& Utf16StringImpl::string() const
@@ -52,7 +57,7 @@ Utf16Data const& Utf16StringImpl::string() const
 
 Utf16View Utf16StringImpl::view() const
 {
-    return Utf16View { m_string };
+    return m_cached_view;
 }
 
 u32 Utf16StringImpl::compute_hash() const
@@ -82,6 +87,12 @@ Utf16String Utf16String::create(StringView string)
 Utf16String Utf16String::create(Utf16View const& string)
 {
     return Utf16String { Detail::Utf16StringImpl::create(string) };
+}
+
+Utf16String Utf16String::invalid()
+{
+    static auto invalid = Utf16String {};
+    return invalid;
 }
 
 Utf16String::Utf16String(NonnullRefPtr<Detail::Utf16StringImpl> string)

@@ -13,7 +13,7 @@
 #include <LibCore/EventLoop.h>
 #include <LibCore/Proxy.h>
 #include <LibCore/Socket.h>
-#include <LibRequests/NetworkErrorEnum.h>
+#include <LibRequests/NetworkError.h>
 #include <LibRequests/RequestTimingInfo.h>
 #include <LibRequests/WebSocket.h>
 #include <LibTLS/TLSv12.h>
@@ -22,6 +22,10 @@
 #include <LibWebSocket/Message.h>
 #include <RequestServer/ConnectionFromClient.h>
 #include <RequestServer/RequestClientEndpoint.h>
+#ifdef AK_OS_WINDOWS
+// needed because curl.h includes winsock2.h
+#    include <AK/Windows.h>
+#endif
 #include <curl/curl.h>
 
 namespace RequestServer {
@@ -264,7 +268,7 @@ int ConnectionFromClient::on_timeout_callback(void*, long timeout_ms, void* user
     return 0;
 }
 
-ConnectionFromClient::ConnectionFromClient(IPC::Transport transport)
+ConnectionFromClient::ConnectionFromClient(NonnullOwnPtr<IPC::Transport> transport)
     : IPC::ConnectionFromClient<RequestClientEndpoint, RequestServerEndpoint>(*this, move(transport), s_client_ids.allocate())
     , m_resolver(default_resolver())
 {
@@ -318,7 +322,7 @@ Messages::RequestServer::InitTransportResponse ConnectionFromClient::init_transp
 
 Messages::RequestServer::ConnectNewClientResponse ConnectionFromClient::connect_new_client()
 {
-    static_assert(IsSame<IPC::Transport, IPC::TransportSocket>, "Need to handle other IPC transports here");
+    // TODO: Mach IPC
 
     int socket_fds[2] {};
     if (auto err = Core::System::socketpair(AF_LOCAL, SOCK_STREAM, 0, socket_fds); err.is_error()) {
@@ -335,7 +339,7 @@ Messages::RequestServer::ConnectNewClientResponse ConnectionFromClient::connect_
     }
     auto client_socket = client_socket_or_error.release_value();
     // Note: A ref is stored in the static s_connections map
-    auto client = adopt_ref(*new ConnectionFromClient(IPC::Transport(move(client_socket))));
+    auto client = adopt_ref(*new ConnectionFromClient(make<IPC::Transport>(move(client_socket))));
 
     return IPC::File::adopt_fd(socket_fds[1]);
 }
@@ -372,13 +376,22 @@ void ConnectionFromClient::set_dns_server(ByteString host_or_address, u16 port, 
         default_resolver()->dns.reset_connection();
 }
 
+void ConnectionFromClient::set_use_system_dns()
+{
+    g_dns_info.server_hostname = {};
+    g_dns_info.server_address = {};
+    default_resolver()->dns.reset_connection();
+}
+
+#ifdef AK_OS_WINDOWS
+void ConnectionFromClient::start_request(i32, ByteString, URL::URL, HTTP::HeaderMap, ByteBuffer, Core::ProxyData)
+{
+    VERIFY(0 && "RequestServer::ConnectionFromClient::start_request is not implemented");
+}
+#else
 void ConnectionFromClient::start_request(i32 request_id, ByteString method, URL::URL url, HTTP::HeaderMap request_headers, ByteBuffer request_body, Core::ProxyData proxy_data)
 {
     auto host = url.serialized_host().to_byte_string();
-
-    // Check if host has the bracket notation for IPV6 addresses and remove them
-    if (host.starts_with("["sv) && host.ends_with("]"sv))
-        host = host.substring(1, host.length() - 2);
 
     m_resolver->dns.lookup(host, DNS::Messages::Class::IN, { DNS::Messages::ResourceType::A, DNS::Messages::ResourceType::AAAA })
         ->when_rejected([this, request_id](auto const& error) {
@@ -500,6 +513,7 @@ void ConnectionFromClient::start_request(i32 request_id, ByteString method, URL:
             m_active_requests.set(request_id, move(request));
         });
 }
+#endif
 
 static Requests::NetworkError map_curl_code_to_network_error(CURLcode const& code)
 {
@@ -520,6 +534,8 @@ static Requests::NetworkError map_curl_code_to_network_error(CURLcode const& cod
         return Requests::NetworkError::SSLVerificationFailed;
     case CURLE_URL_MALFORMAT:
         return Requests::NetworkError::MalformedUrl;
+    case CURLE_BAD_CONTENT_ENCODING:
+        return Requests::NetworkError::InvalidContentEncoding;
     default:
         return Requests::NetworkError::Unknown;
     }
@@ -624,6 +640,13 @@ void ConnectionFromClient::check_active_requests()
 
             auto result_code = msg->data.result;
 
+            // HTTPS servers might terminate their connection without proper notice of shutdown - i.e. they do not send
+            // a "close notify" alert. OpenSSL version 3.2 began treating this as an error, which curl translates to
+            // CURLE_RECV_ERROR in the absence of a Content-Length response header. The Python server used by WPT is one
+            // such server. We ignore this error if we were actually able to download some response data.
+            if (result_code == CURLE_RECV_ERROR && request->downloaded_so_far != 0 && !request->headers.contains("Content-Length"sv))
+                result_code = CURLE_OK;
+
             Optional<Requests::NetworkError> network_error;
             bool const request_was_successful = result_code == CURLE_OK;
             if (!request_was_successful) {
@@ -718,10 +741,6 @@ void ConnectionFromClient::ensure_connection(URL::URL url, ::RequestServer::Cach
 void ConnectionFromClient::websocket_connect(i64 websocket_id, URL::URL url, ByteString origin, Vector<ByteString> protocols, Vector<ByteString> extensions, HTTP::HeaderMap additional_request_headers)
 {
     auto host = url.serialized_host().to_byte_string();
-
-    // Check if host has the bracket notation for IPV6 addresses and remove them
-    if (host.starts_with("["sv) && host.ends_with("]"sv))
-        host = host.substring(1, host.length() - 2);
 
     m_resolver->dns.lookup(host, DNS::Messages::Class::IN, { DNS::Messages::ResourceType::A, DNS::Messages::ResourceType::AAAA })
         ->when_rejected([this, websocket_id](auto const& error) {

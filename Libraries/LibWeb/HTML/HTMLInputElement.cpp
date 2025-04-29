@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018-2023, Andreas Kling <andreas@ladybird.org>
+ * Copyright (c) 2018-2025, Andreas Kling <andreas@ladybird.org>
  * Copyright (c) 2022, Adam Hodgen <ant1441@gmail.com>
  * Copyright (c) 2022, Andrew Kaster <akaster@serenityos.org>
  * Copyright (c) 2023-2025, Shannon Booth <shannon@serenityos.org>
@@ -19,6 +19,7 @@
 #include <LibWeb/Bindings/HTMLInputElementPrototype.h>
 #include <LibWeb/Bindings/PrincipalHostDefined.h>
 #include <LibWeb/CSS/ComputedProperties.h>
+#include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/CSS/StyleValues/CSSKeywordValue.h>
 #include <LibWeb/CSS/StyleValues/DisplayStyleValue.h>
 #include <LibWeb/CSS/StyleValues/LengthStyleValue.h>
@@ -72,8 +73,8 @@ HTMLInputElement::~HTMLInputElement() = default;
 
 void HTMLInputElement::initialize(JS::Realm& realm)
 {
-    Base::initialize(realm);
     WEB_SET_PROTOTYPE_FOR_INTERFACE(HTMLInputElement);
+    Base::initialize(realm);
 }
 
 void HTMLInputElement::visit_edges(Cell::Visitor& visitor)
@@ -144,7 +145,7 @@ void HTMLInputElement::adjust_computed_style(CSS::ComputedProperties& style)
             style.set_property(CSS::PropertyID::Width, CSS::LengthStyleValue::create(CSS::Length(size(), CSS::Length::Type::Ch)));
     }
 
-    // NOTE: The following line-height check is done for web compatability and usability reasons.
+    // NOTE: The following line-height check is done for web compatibility and usability reasons.
     // FIXME: The "normal" line-height value should be calculated but assume 1.0 for now.
     double normal_line_height = 1.0;
     double current_line_height = style.line_height().to_double();
@@ -744,15 +745,40 @@ void HTMLInputElement::commit_pending_changes()
     dispatch_event(change_event);
 }
 
+static GC::Ref<CSS::CSSStyleProperties> placeholder_style_when_visible()
+{
+    static GC::Root<CSS::CSSStyleProperties> style;
+    if (!style) {
+        style = CSS::CSSStyleProperties::create(internal_css_realm(), {}, {});
+        style->set_declarations_from_text(R"~~~(
+                width: 100%;
+                align-items: center;
+                text-overflow: clip;
+                white-space: nowrap;
+                display: block;
+            )~~~"sv);
+    }
+    return *style;
+}
+
+static GC::Ref<CSS::CSSStyleProperties> placeholder_style_when_hidden()
+{
+    static GC::Root<CSS::CSSStyleProperties> style;
+    if (!style) {
+        style = CSS::CSSStyleProperties::create(internal_css_realm(), {}, {});
+        style->set_declarations_from_text("display: none;"sv);
+    }
+    return *style;
+}
+
 void HTMLInputElement::update_placeholder_visibility()
 {
     if (!m_placeholder_element)
         return;
-    if (this->placeholder_value().has_value()) {
-        MUST(m_placeholder_element->style_for_bindings()->set_property(CSS::PropertyID::Display, "block"sv));
-    } else {
-        MUST(m_placeholder_element->style_for_bindings()->set_property(CSS::PropertyID::Display, "none"sv));
-    }
+    if (this->placeholder_value().has_value())
+        m_placeholder_element->set_inline_style(placeholder_style_when_visible());
+    else
+        m_placeholder_element->set_inline_style(placeholder_style_when_hidden());
 }
 
 void HTMLInputElement::update_button_input_shadow_tree()
@@ -989,26 +1015,27 @@ void HTMLInputElement::create_text_input_shadow_tree()
 
     auto initial_value = m_value;
     auto element = MUST(DOM::create_element(document(), HTML::TagNames::div, Namespace::HTML));
-    MUST(element->set_attribute(HTML::AttributeNames::style, R"~~~(
-        display: flex;
-        height: 100%;
-        align-items: center;
-        white-space: pre;
-        border: none;
-        padding: 1px 2px;
-    )~~~"_string));
+    {
+        static GC::Root<CSS::CSSStyleProperties> style;
+        if (!style) {
+            style = CSS::CSSStyleProperties::create(internal_css_realm(), {}, {});
+            style->set_declarations_from_text(R"~~~(
+                display: flex;
+                height: 100%;
+                align-items: center;
+                white-space: pre;
+                border: none;
+                padding: 1px 2px;
+            )~~~"sv);
+        }
+        element->set_inline_style(*style);
+    }
     MUST(shadow_root->append_child(element));
 
     m_placeholder_element = MUST(DOM::create_element(document(), HTML::TagNames::div, Namespace::HTML));
     m_placeholder_element->set_use_pseudo_element(CSS::PseudoElement::Placeholder);
+    update_placeholder_visibility();
 
-    // https://www.w3.org/TR/css-ui-4/#input-rules
-    MUST(m_placeholder_element->set_attribute(HTML::AttributeNames::style, R"~~~(
-        width: 100%;
-        align-items: center;
-        text-overflow: clip;
-        white-space: nowrap;
-    )~~~"_string));
     MUST(element->append_child(*m_placeholder_element));
 
     m_placeholder_text_node = realm().create<DOM::Text>(document(), String {});
@@ -1017,13 +1044,20 @@ void HTMLInputElement::create_text_input_shadow_tree()
 
     // https://www.w3.org/TR/css-ui-4/#input-rules
     m_inner_text_element = MUST(DOM::create_element(document(), HTML::TagNames::div, Namespace::HTML));
-    MUST(m_inner_text_element->set_attribute(HTML::AttributeNames::style, R"~~~(
-        width: 100%;
-        height: 1lh;
-        align-items: center;
-        text-overflow: clip;
-        white-space: nowrap;
-    )~~~"_string));
+    {
+        static GC::Root<CSS::CSSStyleProperties> style;
+        if (!style) {
+            style = CSS::CSSStyleProperties::create(internal_css_realm(), {}, {});
+            style->set_declarations_from_text(R"~~~(
+                width: 100%;
+                height: 1lh;
+                align-items: center;
+                text-overflow: clip;
+                white-space: nowrap;
+            )~~~"sv);
+        }
+        m_inner_text_element->set_inline_style(*style);
+    }
     MUST(element->append_child(*m_inner_text_element));
 
     m_text_node = realm().create<DOM::Text>(document(), move(initial_value));
@@ -1183,15 +1217,15 @@ void HTMLInputElement::create_range_input_shadow_tree()
     set_shadow_root(shadow_root);
 
     m_slider_runnable_track = MUST(DOM::create_element(document(), HTML::TagNames::div, Namespace::HTML));
-    m_slider_runnable_track->set_use_pseudo_element(CSS::PseudoElement::Track);
+    m_slider_runnable_track->set_use_pseudo_element(CSS::PseudoElement::SliderTrack);
     MUST(shadow_root->append_child(*m_slider_runnable_track));
 
     m_slider_progress_element = MUST(DOM::create_element(document(), HTML::TagNames::div, Namespace::HTML));
-    m_slider_progress_element->set_use_pseudo_element(CSS::PseudoElement::Fill);
+    m_slider_progress_element->set_use_pseudo_element(CSS::PseudoElement::SliderFill);
     MUST(m_slider_runnable_track->append_child(*m_slider_progress_element));
 
     m_slider_thumb = MUST(DOM::create_element(document(), HTML::TagNames::div, Namespace::HTML));
-    m_slider_thumb->set_use_pseudo_element(CSS::PseudoElement::Thumb);
+    m_slider_thumb->set_use_pseudo_element(CSS::PseudoElement::SliderThumb);
     MUST(m_slider_runnable_track->append_child(*m_slider_thumb));
 
     update_slider_shadow_tree_elements();
@@ -1422,7 +1456,8 @@ void HTMLInputElement::type_attribute_changed(TypeAttributeState old_state, Type
     set_shadow_root(nullptr);
     create_shadow_tree_if_needed();
 
-    // FIXME: 5. Signal a type change for the element. (The Radio Button state uses this, in particular.)
+    // 5. Signal a type change for the element. (The Radio Button state uses this, in particular.)
+    signal_a_type_change();
 
     // 6. Invoke the value sanitization algorithm, if one is defined for the type attribute's new state.
     m_value = value_sanitization_algorithm(m_value);
@@ -1436,7 +1471,25 @@ void HTMLInputElement::type_attribute_changed(TypeAttributeState old_state, Type
     // 9. If previouslySelectable is false and nowSelectable is true, set the element's text entry cursor position to the
     //    beginning of the text control, and set its selection direction to "none".
     if (!previously_selectable && now_selectable) {
+        set_the_selection_range(0, 0);
         set_selection_direction(OptionalNone {});
+    }
+}
+
+// https://html.spec.whatwg.org/multipage/input.html#radio-button-state-(type=radio):signal-a-type-change
+void HTMLInputElement::signal_a_type_change()
+{
+    // https://html.spec.whatwg.org/multipage/input.html#radio-button-state-(type=radio)
+    // When any of the following phenomena occur, if the element's checkedness state is true after the occurrence,
+    // the checkedness state of all the other elements in the same radio button group must be set to false:
+    // ...
+    // - A type change is signalled for the element.
+    if (type_state() == TypeAttributeState::RadioButton && checked()) {
+        root().for_each_in_inclusive_subtree_of_type<HTMLInputElement>([&](auto& element) {
+            if (element.checked() && &element != this && is_in_same_radio_button_group(*this, element))
+                element.set_checked(false);
+            return TraversalDecision::Continue;
+        });
     }
 }
 
@@ -1481,7 +1534,7 @@ WebIDL::ExceptionOr<void> HTMLInputElement::handle_src_attribute(String const& v
             });
 
             m_load_event_delayer.clear();
-            set_needs_layout_tree_update(true);
+            set_needs_layout_tree_update(true, DOM::SetNeedsLayoutTreeUpdateReason::HTMLInputElementSrcAttribute);
         },
         [this, &realm]() {
             // 2. Otherwise, if the fetching process fails without a response from the remote server, or completes but the
@@ -2175,7 +2228,7 @@ static Optional<double> convert_local_date_and_time_string_to_number(StringView 
     auto date = date_and_time.date;
     auto time = date_and_time.time;
 
-    auto date_time = UnixDateTime::from_unix_time_parts(date.year, date.month, date.day, time.hour, time.minute, time.second, 0);
+    auto date_time = UnixDateTime::from_unix_time_parts(date.year, date.month, date.day, time.hour, time.minute, time.second, static_cast<i32>(time.second * 1000) % 1000);
     return date_time.milliseconds_since_epoch();
 }
 
@@ -2370,7 +2423,7 @@ WebIDL::ExceptionOr<GC::Ptr<JS::Date>> HTMLInputElement::convert_string_to_date(
 }
 
 // https://html.spec.whatwg.org/multipage/input.html#concept-input-value-date-string
-String HTMLInputElement::covert_date_to_string(GC::Ref<JS::Date> input) const
+String HTMLInputElement::convert_date_to_string(GC::Ref<JS::Date> input) const
 {
     // https://html.spec.whatwg.org/multipage/input.html#date-state-(type=date):concept-input-value-date-string
     if (type_state() == TypeAttributeState::Date) {
@@ -2386,7 +2439,7 @@ String HTMLInputElement::covert_date_to_string(GC::Ref<JS::Date> input) const
         return convert_number_to_time_string(input->date_value());
     }
 
-    dbgln("HTMLInputElement::covert_date_to_string() not implemented for input type {}", type());
+    dbgln("HTMLInputElement::convert_date_to_string() not implemented for input type {}", type());
     return {};
 }
 
@@ -2441,8 +2494,23 @@ double HTMLInputElement::default_step() const
     if (type_state() == TypeAttributeState::Time)
         return 60;
 
-    dbgln("HTMLInputElement::default_step() not implemented for input type {}", type());
-    return 0;
+    // https://html.spec.whatwg.org/multipage/input.html#date-state-(type=date):concept-input-step-default
+    if (type_state() == TypeAttributeState::Date)
+        return 1;
+
+    // https://html.spec.whatwg.org/multipage/input.html#month-state-(type=month):concept-input-step-default
+    if (type_state() == TypeAttributeState::Month)
+        return 1;
+
+    // https://html.spec.whatwg.org/multipage/input.html#week-state-(type=week):concept-input-step-default
+    if (type_state() == TypeAttributeState::Week)
+        return 1;
+
+    // https://html.spec.whatwg.org/multipage/input.html#local-date-and-time-state-(type=datetime-local):concept-input-step-default
+    if (type_state() == TypeAttributeState::LocalDateAndTime)
+        return 60;
+
+    VERIFY_NOT_REACHED();
 }
 
 // https://html.spec.whatwg.org/multipage/input.html#concept-input-step-scale
@@ -2460,8 +2528,23 @@ double HTMLInputElement::step_scale_factor() const
     if (type_state() == TypeAttributeState::Time)
         return 1000;
 
-    dbgln("HTMLInputElement::step_scale_factor() not implemented for input type {}", type());
-    return 0;
+    // https://html.spec.whatwg.org/multipage/input.html#date-state-(type=date):concept-input-step-scale
+    if (type_state() == TypeAttributeState::Date)
+        return 86400000;
+
+    // https://html.spec.whatwg.org/multipage/input.html#month-state-(type=month):concept-input-step-scale
+    if (type_state() == TypeAttributeState::Month)
+        return 1;
+
+    // https://html.spec.whatwg.org/multipage/input.html#week-state-(type=week):concept-input-step-scale
+    if (type_state() == TypeAttributeState::Week)
+        return 604800000;
+
+    // https://html.spec.whatwg.org/multipage/input.html#local-date-and-time-state-(type=datetime-local):concept-input-step-scale
+    if (type_state() == TypeAttributeState::LocalDateAndTime)
+        return 1000;
+
+    VERIFY_NOT_REACHED();
 }
 
 // https://html.spec.whatwg.org/multipage/input.html#concept-input-step
@@ -2555,7 +2638,7 @@ WebIDL::ExceptionOr<void> HTMLInputElement::set_value_as_date(Optional<GC::Root<
     }
 
     // otherwise, run the algorithm to convert a Date object to a string, as defined for that state, on the new value, and set the value of the element to the resulting string.
-    TRY(set_value(covert_date_to_string(date)));
+    TRY(set_value(convert_date_to_string(date)));
     return {};
 }
 

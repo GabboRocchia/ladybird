@@ -8,6 +8,7 @@
 #include <AK/Array.h>
 #include <AK/Checked.h>
 #include <AK/Endian.h>
+#include <AK/Enumerate.h>
 #include <AK/FlyString.h>
 #include <AK/Format.h>
 #include <AK/MemMem.h>
@@ -60,6 +61,36 @@ ErrorOr<String> String::from_utf8(StringView view)
     return result;
 }
 
+ErrorOr<String> String::from_utf16_le(ReadonlyBytes bytes)
+{
+    if (!validate_utf16_le(bytes))
+        return Error::from_string_literal("String::from_utf16_le: Input was not valid UTF-16LE");
+    if (bytes.is_empty())
+        return String {};
+    char16_t const* utf16_data = reinterpret_cast<char16_t const*>(bytes.data());
+    size_t utf16_length = bytes.size() / 2;
+    size_t max_utf8_length = simdutf::utf8_length_from_utf16(utf16_data, utf16_length);
+    Vector<u8> buffer;
+    buffer.resize(max_utf8_length);
+    auto utf8_length = simdutf::convert_utf16le_to_utf8(utf16_data, utf16_length, reinterpret_cast<char*>(buffer.data()));
+    return String::from_utf8_without_validation(ReadonlyBytes { buffer.data(), utf8_length });
+}
+
+ErrorOr<String> String::from_utf16_be(ReadonlyBytes bytes)
+{
+    if (!validate_utf16_be(bytes))
+        return Error::from_string_literal("String::from_utf16_be: Input was not valid UTF-16BE");
+    if (bytes.is_empty())
+        return String {};
+    char16_t const* utf16_data = reinterpret_cast<char16_t const*>(bytes.data());
+    size_t utf16_length = bytes.size() / 2;
+    size_t max_utf8_length = simdutf::utf8_length_from_utf16(utf16_data, utf16_length);
+    Vector<u8> buffer;
+    buffer.resize(max_utf8_length);
+    auto utf8_length = simdutf::convert_utf16be_to_utf8(utf16_data, utf16_length, reinterpret_cast<char*>(buffer.data()));
+    return String::from_utf8_without_validation(ReadonlyBytes { buffer.data(), utf8_length });
+}
+
 ErrorOr<String> String::from_utf16(Utf16View const& utf16)
 {
     if (!utf16.validate())
@@ -69,32 +100,11 @@ ErrorOr<String> String::from_utf16(Utf16View const& utf16)
 
     String result;
 
-    auto utf8_length = [&]() {
-        switch (utf16.endianness()) {
-        case Endianness::Host:
-            return simdutf::utf8_length_from_utf16(utf16.char_data(), utf16.length_in_code_units());
-        case Endianness::Big:
-            return simdutf::utf8_length_from_utf16be(utf16.char_data(), utf16.length_in_code_units());
-        case Endianness::Little:
-            return simdutf::utf8_length_from_utf16le(utf16.char_data(), utf16.length_in_code_units());
-        }
-        VERIFY_NOT_REACHED();
-    }();
+    auto utf8_length = simdutf::utf8_length_from_utf16(utf16.char_data(), utf16.length_in_code_units());
 
     TRY(result.replace_with_new_string(utf8_length, [&](Bytes buffer) -> ErrorOr<void> {
-        [[maybe_unused]] auto result = [&]() {
-            switch (utf16.endianness()) {
-            case Endianness::Host:
-                return simdutf::convert_utf16_to_utf8(utf16.char_data(), utf16.length_in_code_units(), reinterpret_cast<char*>(buffer.data()));
-            case Endianness::Big:
-                return simdutf::convert_utf16be_to_utf8(utf16.char_data(), utf16.length_in_code_units(), reinterpret_cast<char*>(buffer.data()));
-            case Endianness::Little:
-                return simdutf::convert_utf16le_to_utf8(utf16.char_data(), utf16.length_in_code_units(), reinterpret_cast<char*>(buffer.data()));
-            }
-            VERIFY_NOT_REACHED();
-        }();
+        [[maybe_unused]] auto result = simdutf::convert_utf16_to_utf8(utf16.char_data(), utf16.length_in_code_units(), reinterpret_cast<char*>(buffer.data()));
         ASSERT(result == buffer.size());
-
         return {};
     }));
 
@@ -154,16 +164,6 @@ ErrorOr<String> String::repeated(u32 code_point, size_t count)
         return ErrorOr<void> {};
     }));
     return result;
-}
-
-StringView String::bytes_as_string_view() const&
-{
-    return StringView(bytes());
-}
-
-bool String::is_empty() const
-{
-    return bytes().size() == 0;
 }
 
 ErrorOr<String> String::vformatted(StringView fmtstr, TypeErasedFormatParams& params)
@@ -352,14 +352,19 @@ bool String::starts_with_bytes(StringView bytes, CaseSensitivity case_sensitivit
 
 bool String::ends_with(u32 code_point) const
 {
+    ASSERT(is_unicode(code_point));
+
     if (is_empty())
         return false;
 
-    u32 last_code_point = 0;
-    for (auto it = code_points().begin(); it != code_points().end(); ++it)
-        last_code_point = *it;
+    Array<u8, 4> code_point_as_utf8;
+    size_t i = 0;
 
-    return last_code_point == code_point;
+    size_t code_point_byte_length = UnicodeUtils::code_point_to_utf8(code_point, [&](auto byte) {
+        code_point_as_utf8[i++] = static_cast<u8>(byte);
+    });
+
+    return ends_with_bytes(StringView { code_point_as_utf8.data(), code_point_byte_length });
 }
 
 bool String::ends_with_bytes(StringView bytes, CaseSensitivity case_sensitivity) const
@@ -384,50 +389,34 @@ ErrorOr<String> String::from_byte_string(ByteString const& byte_string)
 
 String String::to_ascii_lowercase() const
 {
-    bool const has_ascii_uppercase = [&] {
-        for (u8 const byte : bytes()) {
-            if (AK::is_ascii_upper_alpha(byte))
-                return true;
-        }
-        return false;
-    }();
-
-    if (!has_ascii_uppercase)
+    if (!any_of(bytes(), is_ascii_upper_alpha))
         return *this;
 
-    Vector<u8> lowercase_bytes;
-    lowercase_bytes.ensure_capacity(bytes().size());
-    for (u8 const byte : bytes()) {
-        if (AK::is_ascii_upper_alpha(byte))
-            lowercase_bytes.unchecked_append(AK::to_ascii_lowercase(byte));
-        else
-            lowercase_bytes.unchecked_append(byte);
-    }
-    return String::from_utf8_without_validation(lowercase_bytes);
+    String result;
+
+    MUST(result.replace_with_new_string(byte_count(), [&](Bytes buffer) -> ErrorOr<void> {
+        for (auto [i, byte] : enumerate(bytes()))
+            buffer[i] = static_cast<u8>(AK::to_ascii_lowercase(byte));
+        return {};
+    }));
+
+    return result;
 }
 
 String String::to_ascii_uppercase() const
 {
-    bool const has_ascii_lowercase = [&] {
-        for (u8 const byte : bytes()) {
-            if (AK::is_ascii_lower_alpha(byte))
-                return true;
-        }
-        return false;
-    }();
-
-    if (!has_ascii_lowercase)
+    if (!any_of(bytes(), is_ascii_lower_alpha))
         return *this;
 
-    Vector<u8> uppercase_bytes;
-    uppercase_bytes.ensure_capacity(bytes().size());
-    for (u8 const byte : bytes()) {
-        if (AK::is_ascii_lower_alpha(byte))
-            uppercase_bytes.unchecked_append(AK::to_ascii_uppercase(byte));
-        else
-            uppercase_bytes.unchecked_append(byte);
-    }
-    return String::from_utf8_without_validation(uppercase_bytes);
+    String result;
+
+    MUST(result.replace_with_new_string(byte_count(), [&](Bytes buffer) -> ErrorOr<void> {
+        for (auto [i, byte] : enumerate(bytes()))
+            buffer[i] = static_cast<u8>(AK::to_ascii_uppercase(byte));
+        return {};
+    }));
+
+    return result;
 }
 
 bool String::equals_ignoring_ascii_case(String const& other) const

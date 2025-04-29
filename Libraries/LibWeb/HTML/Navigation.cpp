@@ -39,14 +39,14 @@ NavigationAPIMethodTracker::NavigationAPIMethodTracker(GC::Ref<Navigation> navig
     Optional<String> key,
     JS::Value info,
     Optional<SerializationRecord> serialized_state,
-    GC::Ptr<NavigationHistoryEntry> commited_to_entry,
+    GC::Ptr<NavigationHistoryEntry> committed_to_entry,
     GC::Ref<WebIDL::Promise> committed_promise,
     GC::Ref<WebIDL::Promise> finished_promise)
     : navigation(navigation)
     , key(move(key))
     , info(info)
     , serialized_state(move(serialized_state))
-    , commited_to_entry(commited_to_entry)
+    , committed_to_entry(committed_to_entry)
     , committed_promise(committed_promise)
     , finished_promise(finished_promise)
 {
@@ -57,7 +57,7 @@ void NavigationAPIMethodTracker::visit_edges(Cell::Visitor& visitor)
     Base::visit_edges(visitor);
     visitor.visit(navigation);
     visitor.visit(info);
-    visitor.visit(commited_to_entry);
+    visitor.visit(committed_to_entry);
     visitor.visit(committed_promise);
     visitor.visit(finished_promise);
 }
@@ -76,8 +76,8 @@ Navigation::~Navigation() = default;
 
 void Navigation::initialize(JS::Realm& realm)
 {
-    Base::initialize(realm);
     WEB_SET_PROTOTYPE_FOR_INTERFACE(Navigation);
+    Base::initialize(realm);
 }
 
 void Navigation::visit_edges(JS::Cell::Visitor& visitor)
@@ -544,15 +544,15 @@ GC::Ref<NavigationAPIMethodTracker> Navigation::maybe_set_the_upcoming_non_trave
     //     key:               null
     //     info:              info
     //     serialized state:  serializedState
-    //     comitted-to entry: null
-    //     comitted promise:  committedPromise
+    //     committed-to entry: null
+    //     committed promise:  committedPromise
     //     finished promise:  finishedPromise
     auto api_method_tracker = vm.heap().allocate<NavigationAPIMethodTracker>(
         /* .navigation = */ *this,
         /* .key = */ OptionalNone {},
         /* .info = */ info,
         /* .serialized_state = */ move(serialized_state),
-        /* .commited_to_entry = */ nullptr,
+        /* .committed_to_entry = */ nullptr,
         /* .committed_promise = */ committed_promise,
         /* .finished_promise = */ finished_promise);
 
@@ -593,15 +593,15 @@ GC::Ref<NavigationAPIMethodTracker> Navigation::add_an_upcoming_traverse_api_met
     //     key:               destinationKey
     //     info:              info
     //     serialized state:  null
-    //     comitted-to entry: null
-    //     comitted promise:  committedPromise
+    //     committed-to entry: null
+    //     committed promise:  committedPromise
     //     finished promise:  finishedPromise
     auto api_method_tracker = vm.heap().allocate<NavigationAPIMethodTracker>(
         /* .navigation = */ *this,
         /* .key = */ destination_key,
         /* .info = */ info,
         /* .serialized_state = */ OptionalNone {},
-        /* .commited_to_entry = */ nullptr,
+        /* .committed_to_entry = */ nullptr,
         /* .committed_promise = */ committed_promise,
         /* .finished_promise = */ finished_promise);
 
@@ -855,10 +855,10 @@ void Navigation::resolve_the_finished_promise(GC::Ref<NavigationAPIMethodTracker
     auto& realm = this->realm();
 
     // 1. Assert: apiMethodTracker's committed-to entry is not null.
-    VERIFY(api_method_tracker->commited_to_entry != nullptr);
+    VERIFY(api_method_tracker->committed_to_entry != nullptr);
 
     // 2. Resolve apiMethodTracker's finished promise with its committed-to entry.
-    WebIDL::resolve_promise(realm, api_method_tracker->finished_promise, api_method_tracker->commited_to_entry);
+    WebIDL::resolve_promise(realm, api_method_tracker->finished_promise, api_method_tracker->committed_to_entry);
 
     // 3. Clean up apiMethodTracker.
     clean_up(api_method_tracker);
@@ -887,7 +887,7 @@ void Navigation::notify_about_the_committed_to_entry(GC::Ref<NavigationAPIMethod
     auto& realm = this->realm();
 
     // 1. Set apiMethodTracker's committed-to entry to nhe.
-    api_method_tracker->commited_to_entry = nhe;
+    api_method_tracker->committed_to_entry = nhe;
 
     // 2. If apiMethodTracker's serialized state is not null, then set nhe's session history entry's navigation API state to apiMethodTracker's serialized state.'
     // NOTE: If it's null, then we're traversing to nhe via navigation.traverseTo(), which does not allow changing the state.
@@ -1045,7 +1045,7 @@ bool Navigation::inner_navigate_event_firing_algorithm(
     }
 
     // AD-HOC: *Now* we have all the info required to create the event
-    auto event = NavigateEvent::construct_impl(realm, EventNames::navigate, event_init);
+    auto event = NavigateEvent::create(realm, EventNames::navigate, event_init);
     event->set_abort_controller(abort_controller);
 
     // AD-HOC: This is supposed to be set in "fire a <type> navigate event", and is only non-null when
@@ -1141,9 +1141,9 @@ bool Navigation::inner_navigate_event_firing_algorithm(
         // 2. For each handler of event's navigation handler list:
         for (auto const& handler : event->navigation_handler_list()) {
             // 1. Append the result of invoking handler with an empty arguments list to promisesList.
-            auto result = WebIDL::invoke_callback(handler, {});
+            auto result = WebIDL::invoke_callback(handler, {}, {});
             // This *should* be equivalent to converting a promise to a promise capability
-            promises_list.append(WebIDL::create_resolved_promise(realm, result.value().value()));
+            promises_list.append(WebIDL::create_resolved_promise(realm, result.value()));
         }
 
         // 3. If promisesList's size is 0, then set promisesList to « a promise resolved with undefined ».
@@ -1160,9 +1160,7 @@ bool Navigation::inner_navigate_event_firing_algorithm(
         // 4. Wait for all of promisesList, with the following success steps:
         WebIDL::wait_for_all(
             realm, promises_list, [event, this, api_method_tracker](auto const&) -> void {
-
-                // FIXME: Spec issue: Event's relevant global objects' *associated document*
-                // 1. If event's relevant global object is not fully active, then abort these steps.
+                // 1. If event's relevant global object's associated Document is not fully active, then abort these steps.
                 auto& relevant_global_object = as<HTML::Window>(HTML::relevant_global_object(*event));
                 auto& realm = event->realm();
                 if (!relevant_global_object.associated_document().is_fully_active())
@@ -1197,8 +1195,7 @@ bool Navigation::inner_navigate_event_firing_algorithm(
                 m_transition = nullptr; },
             // and the following failure steps given reason rejectionReason:
             [event, this, api_method_tracker](JS::Value rejection_reason) -> void {
-                // FIXME: Spec issue: Event's relevant global objects' *associated document*
-                // 1. If event's relevant global object is not fully active, then abort these steps.
+                // 1. If event's relevant global object's associated Document is not fully active, then abort these steps.
                 auto& relevant_global_object = as<HTML::Window>(HTML::relevant_global_object(*event));
                 auto& realm = event->realm();
                 if (!relevant_global_object.associated_document().is_fully_active())

@@ -13,6 +13,7 @@
 #include <LibWeb/Streams/ReadableStream.h>
 #include <LibWeb/Streams/ReadableStreamBYOBRequest.h>
 #include <LibWeb/Streams/ReadableStreamDefaultReader.h>
+#include <LibWeb/Streams/ReadableStreamOperations.h>
 #include <LibWeb/WebIDL/Buffers.h>
 
 namespace Web::Streams {
@@ -74,8 +75,8 @@ ReadableByteStreamController::ReadableByteStreamController(JS::Realm& realm)
 
 void ReadableByteStreamController::initialize(JS::Realm& realm)
 {
-    Base::initialize(realm);
     WEB_SET_PROTOTYPE_FOR_INTERFACE(ReadableByteStreamController);
+    Base::initialize(realm);
 }
 
 // https://streams.spec.whatwg.org/#rbs-controller-enqueue
@@ -149,7 +150,7 @@ void ReadableByteStreamController::pull_steps(GC::Ref<ReadRequest> read_request)
         // 2. If buffer is an abrupt completion,
         if (buffer.is_throw_completion()) {
             // 1. Perform readRequest’s error steps, given buffer.[[Value]].
-            read_request->on_error(*buffer.throw_completion().value());
+            read_request->on_error(buffer.throw_completion().value());
 
             // 2. Return.
             return;

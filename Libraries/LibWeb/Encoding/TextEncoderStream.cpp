@@ -12,8 +12,8 @@
 #include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/Bindings/TextEncoderStreamPrototype.h>
 #include <LibWeb/Encoding/TextEncoderStream.h>
-#include <LibWeb/Streams/AbstractOperations.h>
 #include <LibWeb/Streams/TransformStream.h>
+#include <LibWeb/Streams/TransformStreamOperations.h>
 #include <LibWeb/WebIDL/Promise.h>
 
 namespace Web::Encoding {
@@ -41,7 +41,7 @@ WebIDL::ExceptionOr<GC::Ref<TextEncoderStream>> TextEncoderStream::construct_imp
 
         if (auto result = stream->encode_and_enqueue_chunk(chunk); result.is_error()) {
             auto throw_completion = Bindings::exception_to_throw_completion(vm, result.exception());
-            return WebIDL::create_rejected_promise(realm, *throw_completion.release_value());
+            return WebIDL::create_rejected_promise(realm, throw_completion.release_value());
         }
 
         return WebIDL::create_resolved_promise(realm, JS::js_undefined());
@@ -54,7 +54,7 @@ WebIDL::ExceptionOr<GC::Ref<TextEncoderStream>> TextEncoderStream::construct_imp
 
         if (auto result = stream->encode_and_flush(); result.is_error()) {
             auto throw_completion = Bindings::exception_to_throw_completion(vm, result.exception());
-            return WebIDL::create_rejected_promise(realm, *throw_completion.release_value());
+            return WebIDL::create_rejected_promise(realm, throw_completion.release_value());
         }
 
         return WebIDL::create_resolved_promise(realm, JS::js_undefined());
@@ -76,8 +76,8 @@ TextEncoderStream::~TextEncoderStream() = default;
 
 void TextEncoderStream::initialize(JS::Realm& realm)
 {
-    Base::initialize(realm);
     WEB_SET_PROTOTYPE_FOR_INTERFACE(TextEncoderStream);
+    Base::initialize(realm);
 }
 
 void TextEncoderStream::visit_edges(JS::Cell::Visitor& visitor)

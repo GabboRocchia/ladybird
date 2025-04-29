@@ -38,8 +38,8 @@
 #include <LibWeb/HTML/Parser/HTMLEncodingDetection.h>
 #include <LibWeb/HTML/Parser/HTMLParser.h>
 #include <LibWeb/HTML/Parser/HTMLToken.h>
-#include <LibWeb/HTML/Scripting/Agent.h>
 #include <LibWeb/HTML/Scripting/ExceptionReporter.h>
+#include <LibWeb/HTML/Scripting/SimilarOriginWindowAgent.h>
 #include <LibWeb/HTML/Window.h>
 #include <LibWeb/HighResolutionTime/TimeOrigin.h>
 #include <LibWeb/Infra/CharacterTypes.h>
@@ -48,6 +48,10 @@
 #include <LibWeb/Namespace.h>
 #include <LibWeb/SVG/SVGScriptElement.h>
 #include <LibWeb/SVG/TagNames.h>
+
+#ifdef LIBWEB_USE_SWIFT
+#    include <LibWeb-Swift.h>
+#endif
 
 namespace Web::HTML {
 
@@ -189,9 +193,23 @@ void HTMLParser::visit_edges(Cell::Visitor& visitor)
     m_list_of_active_formatting_elements.visit_edges(visitor);
 }
 
+void HTMLParser::initialize(JS::Realm& realm)
+{
+    Base::initialize(realm);
+
+#if defined(LIBWEB_USE_SWIFT)
+    m_speculative_parser = GC::ForeignRef<Web::SpeculativeHTMLParser>::allocate(realm.heap(), this);
+#endif
+}
+
 void HTMLParser::run(HTMLTokenizer::StopAtInsertionPoint stop_at_insertion_point)
 {
     m_stop_parsing = false;
+
+#if defined(LIBWEB_USE_SWIFT)
+    dbgln("Poking Swift Tokenizer");
+    m_speculative_parser->poke();
+#endif
 
     for (;;) {
         auto optional_token = m_tokenizer.next_token(stop_at_insertion_point);
@@ -783,7 +801,7 @@ GC::Ref<DOM::Element> HTMLParser::create_element_for(HTMLToken const& token, Opt
             perform_a_microtask_checkpoint();
 
         // 3. Push a new element queue onto document's relevant agent's custom element reactions stack.
-        relevant_agent(document).custom_element_reactions_stack.element_queue_stack.append({});
+        relevant_similar_origin_window_agent(document).custom_element_reactions_stack.element_queue_stack.append({});
     }
 
     // 9. Let element be the result of creating an element given document, localName, given namespace, null, is, and willExecuteScript.
@@ -792,7 +810,9 @@ GC::Ref<DOM::Element> HTMLParser::create_element_for(HTMLToken const& token, Opt
     // AD-HOC: Let <link> elements know which document they were originally parsed for.
     //         This is used for the render-blocking logic.
     if (local_name == HTML::TagNames::link && namespace_ == Namespace::HTML) {
-        as<HTMLLinkElement>(*element).set_parser_document({}, document);
+        auto& link_element = as<HTMLLinkElement>(*element);
+        link_element.set_parser_document({}, document);
+        link_element.set_was_enabled_when_created_by_parser({}, !token.has_attribute(HTML::AttributeNames::disabled));
     }
 
     // 10. Append each attribute in the given token to element.
@@ -806,7 +826,7 @@ GC::Ref<DOM::Element> HTMLParser::create_element_for(HTMLToken const& token, Opt
     // 11. If willExecuteScript is true:
     if (will_execute_script) {
         // 1. Let queue be the result of popping from document's relevant agent's custom element reactions stack. (This will be the same element queue as was pushed above.)
-        auto queue = relevant_agent(document).custom_element_reactions_stack.element_queue_stack.take_last();
+        auto queue = relevant_similar_origin_window_agent(document).custom_element_reactions_stack.element_queue_stack.take_last();
 
         // 2. Invoke custom element reactions in queue.
         Bindings::invoke_custom_element_reactions(queue);
@@ -818,7 +838,7 @@ GC::Ref<DOM::Element> HTMLParser::create_element_for(HTMLToken const& token, Opt
     // FIXME: 12. If element has an xmlns attribute in the XMLNS namespace whose value is not exactly the same as the element's namespace, that is a parse error.
     //            Similarly, if element has an xmlns:xlink attribute in the XMLNS namespace whose value is not the XLink Namespace, that is a parse error.
 
-    // FIXME: 13. If element is a resettable element, invoke its reset algorithm. (This initializes the element's value and checkedness based on the element's attributes.)
+    // FIXME: 13. If element is a resettable element and not a form-associated custom element, then invoke its reset algorithm. (This initializes the element's value and checkedness based on the element's attributes.)
 
     // 14. If element is a form-associated element and not a form-associated custom element, the form element pointer is not null, there is no template element on the stack of open elements,
     //     element is either not listed or doesn't have a form attribute, and the intended parent is in the same tree as the element pointed to by the form element pointer,
@@ -1094,7 +1114,10 @@ void HTMLParser::handle_in_head(HTMLToken& token)
                 auto result = declarative_shadow_host_element.attach_a_shadow_root(mode, clonable, serializable, delegates_focus, Bindings::SlotAssignmentMode::Named);
                 if (result.is_error()) {
                     report_exception(Bindings::exception_to_throw_completion(vm(), result.release_error()), realm());
-                    insert_an_element_at_the_adjusted_insertion_location(template_);
+                    // FIXME: We do manual "insert before" instead of "insert an element at the adjusted insertion location" here
+                    //        Otherwise, the new insertion location will be inside the template's contents, which is not what we want here.
+                    //        This might be a spec bug(?)
+                    adjusted_insertion_location.parent->insert_before(*template_, adjusted_insertion_location.insert_before_sibling);
                     return;
                 }
 
@@ -4642,21 +4665,21 @@ Vector<GC::Root<DOM::Node>> HTMLParser::parse_html_fragment(DOM::Element& contex
 
 GC::Ref<HTMLParser> HTMLParser::create_for_scripting(DOM::Document& document)
 {
-    return document.heap().allocate<HTMLParser>(document);
+    return document.realm().create<HTMLParser>(document);
 }
 
 GC::Ref<HTMLParser> HTMLParser::create_with_uncertain_encoding(DOM::Document& document, ByteBuffer const& input, Optional<MimeSniff::MimeType> maybe_mime_type)
 {
     if (document.has_encoding())
-        return document.heap().allocate<HTMLParser>(document, input, document.encoding().value().to_byte_string());
+        return document.realm().create<HTMLParser>(document, input, document.encoding().value().to_byte_string());
     auto encoding = run_encoding_sniffing_algorithm(document, input, maybe_mime_type);
     dbgln_if(HTML_PARSER_DEBUG, "The encoding sniffing algorithm returned encoding '{}'", encoding);
-    return document.heap().allocate<HTMLParser>(document, input, encoding);
+    return document.realm().create<HTMLParser>(document, input, encoding);
 }
 
 GC::Ref<HTMLParser> HTMLParser::create(DOM::Document& document, StringView input, StringView encoding)
 {
-    return document.heap().allocate<HTMLParser>(document, input, encoding);
+    return document.realm().create<HTMLParser>(document, input, encoding);
 }
 
 enum class AttributeMode {
@@ -4925,7 +4948,7 @@ String HTMLParser::serialize_html_fragment(DOM::Node const& node, SerializableSh
 }
 
 // https://html.spec.whatwg.org/multipage/common-microsyntaxes.html#current-dimension-value
-static RefPtr<CSS::CSSStyleValue> parse_current_dimension_value(float value, Utf8View input, Utf8View::Iterator position)
+static RefPtr<CSS::CSSStyleValue const> parse_current_dimension_value(float value, Utf8View input, Utf8View::Iterator position)
 {
     // 1. If position is past the end of input, then return value as a length.
     if (position == input.end())
@@ -4940,7 +4963,7 @@ static RefPtr<CSS::CSSStyleValue> parse_current_dimension_value(float value, Utf
 }
 
 // https://html.spec.whatwg.org/multipage/common-microsyntaxes.html#rules-for-parsing-dimension-values
-RefPtr<CSS::CSSStyleValue> parse_dimension_value(StringView string)
+RefPtr<CSS::CSSStyleValue const> parse_dimension_value(StringView string)
 {
     // 1. Let input be the string being parsed.
     auto input = Utf8View(string);
@@ -5014,7 +5037,7 @@ RefPtr<CSS::CSSStyleValue> parse_dimension_value(StringView string)
 }
 
 // https://html.spec.whatwg.org/multipage/common-microsyntaxes.html#rules-for-parsing-non-zero-dimension-values
-RefPtr<CSS::CSSStyleValue> parse_nonzero_dimension_value(StringView string)
+RefPtr<CSS::CSSStyleValue const> parse_nonzero_dimension_value(StringView string)
 {
     // 1. Let input be the string being parsed.
     // 2. Let value be the result of parsing input using the rules for parsing dimension values.
@@ -5217,7 +5240,7 @@ void HTMLParser::insert_an_element_at_the_adjusted_insertion_location(GC::Ref<DO
     // 3. If the parser was not created as part of the HTML fragment parsing algorithm,
     //    then push a new element queue onto element's relevant agent's custom element reactions stack.
     if (!m_parsing_fragment) {
-        relevant_agent(*element).custom_element_reactions_stack.element_queue_stack.append({});
+        relevant_similar_origin_window_agent(*element).custom_element_reactions_stack.element_queue_stack.append({});
     }
 
     // 4. Insert element at the adjusted insertion location.
@@ -5226,7 +5249,7 @@ void HTMLParser::insert_an_element_at_the_adjusted_insertion_location(GC::Ref<DO
     // 5. If the parser was not created as part of the HTML fragment parsing algorithm,
     //    then pop the element queue from element's relevant agent's custom element reactions stack, and invoke custom element reactions in that queue.
     if (!m_parsing_fragment) {
-        auto queue = relevant_agent(*element).custom_element_reactions_stack.element_queue_stack.take_last();
+        auto queue = relevant_similar_origin_window_agent(*element).custom_element_reactions_stack.element_queue_stack.take_last();
         Bindings::invoke_custom_element_reactions(queue);
     }
 }

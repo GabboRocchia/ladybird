@@ -33,8 +33,8 @@ SVGGraphicsElement::SVGGraphicsElement(DOM::Document& document, DOM::QualifiedNa
 
 void SVGGraphicsElement::initialize(JS::Realm& realm)
 {
-    Base::initialize(realm);
     WEB_SET_PROTOTYPE_FOR_INTERFACE(SVGGraphicsElement);
+    Base::initialize(realm);
 }
 
 void SVGGraphicsElement::attribute_changed(FlyString const& name, Optional<String> const& old_value, Optional<String> const& value, Optional<FlyString> const& namespace_)
@@ -45,7 +45,7 @@ void SVGGraphicsElement::attribute_changed(FlyString const& name, Optional<Strin
         auto transform_list = AttributeParser::parse_transform(value.value_or(String {}));
         if (transform_list.has_value())
             m_transform = transform_from_transform_list(*transform_list);
-        set_needs_layout_tree_update(true);
+        set_needs_layout_tree_update(true, DOM::SetNeedsLayoutTreeUpdateReason::SVGGraphicsElementTransformChange);
     }
 }
 
@@ -129,72 +129,6 @@ Gfx::AffineTransform SVGGraphicsElement::get_transform() const
         transform = Gfx::AffineTransform { svg_ancestor->element_transform() }.multiply(transform);
     }
     return transform;
-}
-
-struct NamedPropertyID {
-    NamedPropertyID(CSS::PropertyID property_id)
-        : id(property_id)
-        , name(CSS::string_from_property_id(property_id))
-    {
-    }
-
-    CSS::PropertyID id;
-    StringView name;
-};
-
-static Array const attribute_style_properties {
-    // FIXME: The `fill` attribute and CSS `fill` property are not the same! But our support is limited enough that they are equivalent for now.
-    NamedPropertyID(CSS::PropertyID::Fill),
-    // FIXME: The `stroke` attribute and CSS `stroke` property are not the same! But our support is limited enough that they are equivalent for now.
-    NamedPropertyID(CSS::PropertyID::Stroke),
-    NamedPropertyID(CSS::PropertyID::StrokeDasharray),
-    NamedPropertyID(CSS::PropertyID::StrokeDashoffset),
-    NamedPropertyID(CSS::PropertyID::StrokeLinecap),
-    NamedPropertyID(CSS::PropertyID::StrokeLinejoin),
-    NamedPropertyID(CSS::PropertyID::StrokeMiterlimit),
-    NamedPropertyID(CSS::PropertyID::StrokeWidth),
-    NamedPropertyID(CSS::PropertyID::FillRule),
-    NamedPropertyID(CSS::PropertyID::FillOpacity),
-    NamedPropertyID(CSS::PropertyID::StrokeOpacity),
-    NamedPropertyID(CSS::PropertyID::Opacity),
-    NamedPropertyID(CSS::PropertyID::TextAnchor),
-    NamedPropertyID(CSS::PropertyID::FontSize),
-    NamedPropertyID(CSS::PropertyID::Mask),
-    NamedPropertyID(CSS::PropertyID::MaskType),
-    NamedPropertyID(CSS::PropertyID::ClipPath),
-    NamedPropertyID(CSS::PropertyID::ClipRule),
-    NamedPropertyID(CSS::PropertyID::Display),
-};
-
-bool SVGGraphicsElement::is_presentational_hint(FlyString const& name) const
-{
-    if (Base::is_presentational_hint(name))
-        return true;
-
-    return any_of(attribute_style_properties, [&](auto& property) { return name.equals_ignoring_ascii_case(property.name); });
-}
-
-void SVGGraphicsElement::apply_presentational_hints(GC::Ref<CSS::CascadedProperties> cascaded_properties) const
-{
-    CSS::Parser::ParsingParams parsing_context { document(), CSS::Parser::ParsingMode::SVGPresentationAttribute };
-    for_each_attribute([&](auto& name, auto& value) {
-        for (auto property : attribute_style_properties) {
-            if (!name.equals_ignoring_ascii_case(property.name))
-                continue;
-            if (property.id == CSS::PropertyID::Mask) {
-                // Mask is a shorthand property in CSS, but parse_css_value does not take that into account. For now,
-                // just parse as 'mask-image' as anything else is currently not supported.
-                // FIXME: properly parse longhand 'mask' property
-                if (auto style_value = parse_css_value(parsing_context, value, CSS::PropertyID::MaskImage)) {
-                    cascaded_properties->set_property_from_presentational_hint(CSS::PropertyID::MaskImage, style_value.release_nonnull());
-                }
-            } else {
-                if (auto style_value = parse_css_value(parsing_context, value, property.id))
-                    cascaded_properties->set_property_from_presentational_hint(property.id, style_value.release_nonnull());
-            }
-            break;
-        }
-    });
 }
 
 static FillRule to_svg_fill_rule(CSS::FillRule fill_rule)

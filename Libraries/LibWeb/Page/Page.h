@@ -2,7 +2,7 @@
  * Copyright (c) 2020-2023, Andreas Kling <andreas@ladybird.org>
  * Copyright (c) 2021-2022, Linus Groh <linusg@serenityos.org>
  * Copyright (c) 2022, Sam Atkins <atkinssj@serenityos.org>
- * Copyright (c) 2023, Shannon Booth <shannon@serenityos.org>
+ * Copyright (c) 2023-2025, Shannon Booth <shannon@serenityos.org>
  *
  * SPDX-License-Identifier: BSD-2-Clause
  */
@@ -20,6 +20,7 @@
 #include <LibGfx/Size.h>
 #include <LibIPC/Forward.h>
 #include <LibURL/URL.h>
+#include <LibWeb/Bindings/MainThreadVM.h>
 #include <LibWeb/CSS/PreferredColorScheme.h>
 #include <LibWeb/CSS/PreferredContrast.h>
 #include <LibWeb/CSS/PreferredMotion.h>
@@ -324,7 +325,7 @@ public:
     virtual CSS::PreferredMotion preferred_motion() const = 0;
     virtual void paint_next_frame() = 0;
     virtual void process_screenshot_requests() = 0;
-    virtual void paint(DevicePixelRect const&, Painting::BackingStore&, PaintOptions = {}) = 0;
+    virtual void start_display_list_rendering(DevicePixelRect const&, Painting::BackingStore&, PaintOptions, Function<void()>&& callback) = 0;
     virtual Queue<QueuedInputEvent>& input_event_queue() = 0;
     virtual void report_finished_handling_input_event(u64 page_id, EventResult event_was_handled) = 0;
     virtual void page_did_change_title(ByteString const&) { }
@@ -396,23 +397,19 @@ public:
 
     virtual void page_did_change_audio_play_state(HTML::AudioPlayState) { }
 
-    virtual IPC::File request_worker_agent() { return IPC::File {}; }
+    virtual IPC::File request_worker_agent([[maybe_unused]] Web::Bindings::AgentType worker_type) { return IPC::File {}; }
 
     virtual void page_did_mutate_dom([[maybe_unused]] FlyString const& type, [[maybe_unused]] DOM::Node const& target, [[maybe_unused]] DOM::NodeList& added_nodes, [[maybe_unused]] DOM::NodeList& removed_nodes, [[maybe_unused]] GC::Ptr<DOM::Node> previous_sibling, [[maybe_unused]] GC::Ptr<DOM::Node> next_sibling, [[maybe_unused]] Optional<String> const& attribute_name) { }
 
-    virtual void update_process_statistics() { }
-
-    virtual void request_current_settings() { }
-    virtual void restore_default_settings() { }
-    virtual void set_new_tab_page_url(URL::URL const&) { }
-    virtual void request_available_search_engines() { }
-    virtual void set_search_engine(Optional<String> const&) { }
+    virtual void received_message_from_web_ui([[maybe_unused]] String const& name, [[maybe_unused]] JS::Value data) { }
 
     virtual bool is_ready_to_paint() const = 0;
 
     virtual DisplayListPlayerType display_list_player_type() const = 0;
 
     virtual bool is_headless() const = 0;
+
+    virtual bool is_svg_page_client() const { return false; }
 
 protected:
     virtual ~PageClient() = default;

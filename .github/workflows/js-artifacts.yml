@@ -8,7 +8,6 @@ env:
   LADYBIRD_SOURCE_DIR: ${{ github.workspace }}
   CCACHE_DIR: ${{ github.workspace }}/.ccache
   VCPKG_ROOT:  ${{ github.workspace }}/Build/vcpkg
-  VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
 
 jobs:
   build-and-package:
@@ -17,17 +16,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04]
-        package_type: [Linux-x86_64]
-        os_name: [Linux]
-        include:
-          - os: macos-14
-            package_type: macOS-universal2
-            os_name: macOS
+        os_name: ['Linux']
+        os: ['ubuntu-24.04']
+        arch: ['x86_64']
+        package_type: ['Linux-x86_64']
 
-    concurrency:
-      group: ${{ github.workflow }}-${{ matrix.os_name }}
-      cancel-in-progress: true
+        include:
+          - os_name: 'macOS'
+            os: 'macos-15'
+            arch: 'arm64'
+            package_type: 'macOS-universal2'
 
     steps:
       - name: Checkout LadybirdBrowser/ladybird
@@ -37,17 +35,18 @@ jobs:
         uses: ./.github/actions/setup
         with:
           os: ${{ matrix.os_name }}
-          arch: 'Lagom'
+          arch: ${{ matrix.arch }}
 
       - name: Restore Caches
         uses: ./.github/actions/cache-restore
         id: 'cache-restore'
         with:
           os: ${{ matrix.os_name }}
-          arch: 'Lagom'
+          arch: ${{ matrix.arch }}
           cache_key_extra: 'LibJS Artifacts'
           ccache_path: ${{ env.CCACHE_DIR }}
           download_cache_path: ${{ github.workspace }}/Build/caches
+          vcpkg_cache_path: ${{ github.workspace }}/Build/caches/vcpkg-binary-cache
 
       - name: Create build directory Ubuntu
         run: |
@@ -80,6 +79,8 @@ jobs:
           arch: 'Lagom'
           ccache_path: ${{ env.CCACHE_DIR }}
           ccache_primary_key: ${{ steps.cache-restore.outputs.ccache_primary_key }}
+          vcpkg_cache_path: ${{ github.workspace }}/Build/caches/vcpkg-binary-cache
+          vcpkg_cache_primary_key: ${{ steps.cache-restore.outputs.vcpkg_cache_primary_key }}
 
       - name: Upload js package
         uses: actions/upload-artifact@v4

@@ -27,8 +27,8 @@ Worker::Worker(String const& script_url, WorkerOptions const& options, DOM::Docu
 
 void Worker::initialize(JS::Realm& realm)
 {
-    Base::initialize(realm);
     WEB_SET_PROTOTYPE_FOR_INTERFACE(Worker);
+    Base::initialize(realm);
 }
 
 void Worker::visit_edges(Cell::Visitor& visitor)
@@ -110,7 +110,7 @@ void Worker::run_a_worker(URL::URL& url, EnvironmentSettingsObject& outside_sett
     // and is shared. Run the rest of these steps in that agent.
 
     // Note: This spawns a new process to act as the 'agent' for the worker.
-    m_agent = outside_settings.realm().create<WorkerAgent>(url, options, port, outside_settings);
+    m_agent = outside_settings.realm().create<WorkerAgentParent>(url, options, port, outside_settings);
 }
 
 // https://html.spec.whatwg.org/multipage/workers.html#dom-worker-terminate

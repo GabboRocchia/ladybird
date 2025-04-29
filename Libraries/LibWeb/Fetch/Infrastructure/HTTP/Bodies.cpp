@@ -13,7 +13,7 @@
 #include <LibWeb/Fetch/Infrastructure/IncrementalReadLoopReadRequest.h>
 #include <LibWeb/Fetch/Infrastructure/Task.h>
 #include <LibWeb/HTML/Scripting/TemporaryExecutionContext.h>
-#include <LibWeb/Streams/AbstractOperations.h>
+#include <LibWeb/Streams/ReadableStream.h>
 
 namespace Web::Fetch::Infrastructure {
 
@@ -30,12 +30,12 @@ GC::Ref<Body> Body::create(JS::VM& vm, GC::Ref<Streams::ReadableStream> stream, 
 }
 
 Body::Body(GC::Ref<Streams::ReadableStream> stream)
-    : m_stream(move(stream))
+    : m_stream(stream)
 {
 }
 
 Body::Body(GC::Ref<Streams::ReadableStream> stream, SourceType source, Optional<u64> length)
-    : m_stream(move(stream))
+    : m_stream(stream)
     , m_source(move(source))
     , m_length(move(length))
 {
@@ -94,7 +94,7 @@ void Body::fully_read(JS::Realm& realm, Web::Fetch::Infrastructure::Body::Proces
 
     if (reader.is_exception()) {
         auto throw_completion = Bindings::exception_to_throw_completion(realm.vm(), reader.release_error());
-        error_steps(throw_completion.release_value().value());
+        error_steps(throw_completion.release_value());
         return;
     }
 

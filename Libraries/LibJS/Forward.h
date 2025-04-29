@@ -154,6 +154,7 @@ namespace JS {
 
 class ASTNode;
 class Accessor;
+class Agent;
 struct AsyncGeneratorRequest;
 class BigInt;
 class BoundFunction;
@@ -179,6 +180,7 @@ class ForStatement;
 class FunctionEnvironment;
 class FunctionNode;
 struct FunctionParameter;
+class FunctionParameters;
 class GlobalEnvironment;
 class GlobalObject;
 struct GraphLoadingState;
@@ -273,11 +275,14 @@ JS_ENUMERATE_INTL_OBJECTS
 #undef __JS_ENUMERATE
 
 class Intl;
+class IntlObject;
 class MathematicalValue;
 
 // Not included in JS_ENUMERATE_INTL_OBJECTS due to missing distinct constructor
 class Segments;
 class SegmentsPrototype;
+
+struct ResolutionOptionDescriptor;
 };
 
 namespace Temporal {

@@ -23,8 +23,8 @@ URLPattern::~URLPattern() = default;
 
 void URLPattern::initialize(JS::Realm& realm)
 {
-    Base::initialize(realm);
     WEB_SET_PROTOTYPE_FOR_INTERFACE(URLPattern);
+    Base::initialize(realm);
 }
 
 // https://urlpattern.spec.whatwg.org/#dom-urlpattern-urlpattern
@@ -45,7 +45,7 @@ WebIDL::ExceptionOr<GC::Ref<URLPattern>> URLPattern::construct_impl(JS::Realm& r
 WebIDL::ExceptionOr<GC::Ref<URLPattern>> URLPattern::create(JS::Realm& realm, URLPatternInput const& input, Optional<String> const& base_url, URLPatternOptions const& options)
 {
     // 1. Set this’s associated URL pattern to the result of create given input, baseURL, and options.
-    auto pattern_or_error = URL::Pattern::Pattern::create(input, base_url, options);
+    auto pattern_or_error = URL::Pattern::Pattern::create(input, base_url, options.ignore_case ? URL::Pattern::IgnoreCase::Yes : URL::Pattern::IgnoreCase::No);
     if (pattern_or_error.is_error())
         return WebIDL::SimpleException { WebIDL::SimpleExceptionType::TypeError, pattern_or_error.error().message };
     return realm.create<URLPattern>(realm, pattern_or_error.release_value());

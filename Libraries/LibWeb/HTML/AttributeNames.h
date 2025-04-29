@@ -45,6 +45,7 @@ namespace AttributeNames {
     __ENUMERATE_HTML_ATTRIBUTE(class_, "class")                                          \
     __ENUMERATE_HTML_ATTRIBUTE(classid, "classid")                                       \
     __ENUMERATE_HTML_ATTRIBUTE(clear, "clear")                                           \
+    __ENUMERATE_HTML_ATTRIBUTE(closedby, "closedby")                                     \
     __ENUMERATE_HTML_ATTRIBUTE(code, "code")                                             \
     __ENUMERATE_HTML_ATTRIBUTE(codebase, "codebase")                                     \
     __ENUMERATE_HTML_ATTRIBUTE(codetype, "codetype")                                     \
@@ -151,6 +152,7 @@ namespace AttributeNames {
     __ENUMERATE_HTML_ATTRIBUTE(onchange, "onchange")                                     \
     __ENUMERATE_HTML_ATTRIBUTE(onclick, "onclick")                                       \
     __ENUMERATE_HTML_ATTRIBUTE(onclose, "onclose")                                       \
+    __ENUMERATE_HTML_ATTRIBUTE(oncommand, "oncommand")                                   \
     __ENUMERATE_HTML_ATTRIBUTE(oncontextlost, "oncontextlost")                           \
     __ENUMERATE_HTML_ATTRIBUTE(oncontextmenu, "oncontextmenu")                           \
     __ENUMERATE_HTML_ATTRIBUTE(oncontextrestored, "oncontextrestored")                   \

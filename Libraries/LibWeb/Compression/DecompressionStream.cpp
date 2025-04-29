@@ -15,7 +15,6 @@
 #include <LibWeb/Bindings/ExceptionOrUtils.h>
 #include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/Compression/DecompressionStream.h>
-#include <LibWeb/Streams/AbstractOperations.h>
 #include <LibWeb/Streams/TransformStream.h>
 #include <LibWeb/WebIDL/AbstractOperations.h>
 
@@ -58,7 +57,7 @@ WebIDL::ExceptionOr<GC::Ref<DecompressionStream>> DecompressionStream::construct
 
         if (auto result = stream->decompress_and_enqueue_chunk(chunk); result.is_error()) {
             auto throw_completion = Bindings::exception_to_throw_completion(vm, result.exception());
-            return WebIDL::create_rejected_promise(realm, *throw_completion.release_value());
+            return WebIDL::create_rejected_promise(realm, throw_completion.release_value());
         }
 
         return WebIDL::create_resolved_promise(realm, JS::js_undefined());
@@ -71,7 +70,7 @@ WebIDL::ExceptionOr<GC::Ref<DecompressionStream>> DecompressionStream::construct
 
         if (auto result = stream->decompress_flush_and_enqueue(); result.is_error()) {
             auto throw_completion = Bindings::exception_to_throw_completion(vm, result.exception());
-            return WebIDL::create_rejected_promise(realm, *throw_completion.release_value());
+            return WebIDL::create_rejected_promise(realm, throw_completion.release_value());
         }
 
         return WebIDL::create_resolved_promise(realm, JS::js_undefined());
@@ -95,8 +94,8 @@ DecompressionStream::~DecompressionStream() = default;
 
 void DecompressionStream::initialize(JS::Realm& realm)
 {
-    Base::initialize(realm);
     WEB_SET_PROTOTYPE_FOR_INTERFACE(DecompressionStream);
+    Base::initialize(realm);
 }
 
 void DecompressionStream::visit_edges(JS::Cell::Visitor& visitor)

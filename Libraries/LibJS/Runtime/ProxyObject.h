@@ -21,7 +21,6 @@ public:
 
     virtual ~ProxyObject() override = default;
 
-    virtual FlyString const& name() const override;
     virtual bool has_constructor() const override;
 
     Object const& target() const { return m_target; }
@@ -43,8 +42,9 @@ public:
     virtual ThrowCompletionOr<bool> internal_set(PropertyKey const&, Value value, Value receiver, CacheablePropertyMetadata*) override;
     virtual ThrowCompletionOr<bool> internal_delete(PropertyKey const&) override;
     virtual ThrowCompletionOr<GC::RootVector<Value>> internal_own_property_keys() const override;
-    virtual ThrowCompletionOr<Value> internal_call(Value this_argument, ReadonlySpan<Value> arguments_list) override;
+    virtual ThrowCompletionOr<Value> internal_call(ExecutionContext&, Value this_argument) override;
     virtual ThrowCompletionOr<GC::Ref<Object>> internal_construct(ReadonlySpan<Value> arguments_list, FunctionObject& new_target) override;
+    ThrowCompletionOr<void> validate_non_revoked_proxy() const;
 
 private:
     ProxyObject(Object& target, Object& handler, Object& prototype);

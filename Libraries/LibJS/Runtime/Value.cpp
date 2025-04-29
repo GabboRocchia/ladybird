@@ -233,18 +233,16 @@ ThrowCompletionOr<bool> Value::is_array(VM& vm) const
         return true;
 
     // 3. If argument is a Proxy exotic object, then
-    if (is<ProxyObject>(object)) {
-        auto const& proxy = static_cast<ProxyObject const&>(object);
+    if (auto const* proxy = as_if<ProxyObject>(object)) {
 
-        // a. If argument.[[ProxyHandler]] is null, throw a TypeError exception.
-        if (proxy.is_revoked())
-            return vm.throw_completion<TypeError>(ErrorType::ProxyRevoked);
+        // a. Perform ? ValidateNonRevokedProxy(argument).
+        TRY(proxy->validate_non_revoked_proxy());
 
-        // b. Let target be argument.[[ProxyTarget]].
-        auto const& target = proxy.target();
+        // b. Let proxyTarget be argument.[[ProxyTarget]].
+        auto& proxy_target = proxy->target();
 
-        // c. Return ? IsArray(target).
-        return Value(&target).is_array(vm);
+        // c. Return ? IsArray(proxyTarget).
+        return Value(&proxy_target).is_array(vm);
     }
 
     // 4. Return false.
@@ -326,38 +324,38 @@ GC::Ref<PrimitiveString> Value::typeof_(VM& vm) const
 {
     // 9. If val is a Number, return "number".
     if (is_number())
-        return *vm.typeof_strings.number;
+        return *vm.cached_strings.number;
 
     switch (m_value.tag) {
     // 4. If val is undefined, return "undefined".
     case UNDEFINED_TAG:
-        return *vm.typeof_strings.undefined;
+        return *vm.cached_strings.undefined;
     // 5. If val is null, return "object".
     case NULL_TAG:
-        return *vm.typeof_strings.object;
+        return *vm.cached_strings.object;
     // 6. If val is a String, return "string".
     case STRING_TAG:
-        return *vm.typeof_strings.string;
+        return *vm.cached_strings.string;
     // 7. If val is a Symbol, return "symbol".
     case SYMBOL_TAG:
-        return *vm.typeof_strings.symbol;
+        return *vm.cached_strings.symbol;
     // 8. If val is a Boolean, return "boolean".
     case BOOLEAN_TAG:
-        return *vm.typeof_strings.boolean;
+        return *vm.cached_strings.boolean;
     // 10. If val is a BigInt, return "bigint".
     case BIGINT_TAG:
-        return *vm.typeof_strings.bigint;
+        return *vm.cached_strings.bigint;
     // 11. Assert: val is an Object.
     case OBJECT_TAG:
         // B.3.6.3 Changes to the typeof Operator, https://tc39.es/ecma262/#sec-IsHTMLDDA-internal-slot-typeof
         // 12. If val has an [[IsHTMLDDA]] internal slot, return "undefined".
         if (as_object().is_htmldda())
-            return *vm.typeof_strings.undefined;
+            return *vm.cached_strings.undefined;
         // 13. If val has a [[Call]] internal slot, return "function".
         if (is_function())
-            return *vm.typeof_strings.function;
+            return *vm.cached_strings.function;
         // 14. Return "object".
-        return *vm.typeof_strings.object;
+        return *vm.cached_strings.object;
     default:
         VERIFY_NOT_REACHED();
     }
@@ -559,7 +557,7 @@ ThrowCompletionOr<Value> Value::to_primitive_slow_case(VM& vm, PreferredType pre
 ThrowCompletionOr<GC::Ref<Object>> Value::to_object(VM& vm) const
 {
     auto& realm = *vm.current_realm();
-    VERIFY(!is_empty());
+    VERIFY(!is_special_empty_value());
 
     // Number
     if (is_number()) {
@@ -602,6 +600,17 @@ ThrowCompletionOr<GC::Ref<Object>> Value::to_object(VM& vm) const
 // 7.1.3 ToNumeric ( value ), https://tc39.es/ecma262/#sec-tonumeric
 FLATTEN ThrowCompletionOr<Value> Value::to_numeric_slow_case(VM& vm) const
 {
+    // OPTIMIZATION: Fast paths for some trivial common cases.
+    if (is_boolean()) {
+        return Value(as_bool() ? 1 : 0);
+    }
+    if (is_null()) {
+        return Value(0);
+    }
+    if (is_undefined()) {
+        return js_nan();
+    }
+
     // 1. Let primValue be ? ToPrimitive(value, number).
     auto primitive_value = TRY(to_primitive(vm, Value::PreferredType::Number));
 
@@ -701,7 +710,7 @@ double string_to_number(StringView string)
 // 7.1.4 ToNumber ( argument ), https://tc39.es/ecma262/#sec-tonumber
 ThrowCompletionOr<Value> Value::to_number_slow_case(VM& vm) const
 {
-    VERIFY(!is_empty());
+    VERIFY(!is_special_empty_value());
 
     // 1. If argument is a Number, return argument.
     if (is_number())
@@ -724,7 +733,7 @@ ThrowCompletionOr<Value> Value::to_number_slow_case(VM& vm) const
         return Value(as_bool() ? 1 : 0);
     // 6. If argument is a String, return StringToNumber(argument).
     case STRING_TAG:
-        return string_to_number(as_string().byte_string());
+        return string_to_number(as_string().utf8_string_view());
     // 7. Assert: argument is an Object.
     case OBJECT_TAG: {
         // 8. Let primValue be ? ToPrimitive(argument, number).
@@ -778,7 +787,7 @@ ThrowCompletionOr<GC::Ref<BigInt>> Value::to_bigint(VM& vm) const
         return primitive.as_bigint();
     case STRING_TAG: {
         // 1. Let n be ! StringToBigInt(prim).
-        auto bigint = string_to_bigint(vm, primitive.as_string().byte_string());
+        auto bigint = string_to_bigint(vm, primitive.as_string().utf8_string_view());
 
         // 2. If n is undefined, throw a SyntaxError exception.
         if (!bigint.has_value())
@@ -916,6 +925,26 @@ ThrowCompletionOr<PropertyKey> Value::to_property_key(VM& vm) const
 }
 
 // 7.1.6 ToInt32 ( argument ), https://tc39.es/ecma262/#sec-toint32
+ThrowCompletionOr<i32> Value::to_i32(VM& vm) const
+{
+    if (is_int32())
+        return as_i32();
+
+#if __has_builtin(__builtin_arm_jcvt)
+    if (is_double())
+        return __builtin_arm_jcvt(m_value.as_double);
+#endif
+
+    return to_i32_slow_case(vm);
+}
+
+// 7.1.7 ToUint32 ( argument ), https://tc39.es/ecma262/#sec-touint32
+ThrowCompletionOr<u32> Value::to_u32(VM& vm) const
+{
+    return static_cast<u32>(TRY(to_i32(vm)));
+}
+
+// 7.1.6 ToInt32 ( argument ), https://tc39.es/ecma262/#sec-toint32
 ThrowCompletionOr<i32> Value::to_i32_slow_case(VM& vm) const
 {
     VERIFY(!is_int32());
@@ -923,6 +952,9 @@ ThrowCompletionOr<i32> Value::to_i32_slow_case(VM& vm) const
     // 1. Let number be ? ToNumber(argument).
     double number = TRY(to_number(vm)).as_double();
 
+#if __has_builtin(__builtin_arm_jcvt)
+    return __builtin_arm_jcvt(number);
+#else
     // 2. If number is not finite or number is either +0𝔽 or -0𝔽, return +0𝔽.
     if (!isfinite(number) || number == 0)
         return 0;
@@ -940,42 +972,7 @@ ThrowCompletionOr<i32> Value::to_i32_slow_case(VM& vm) const
     if (int32bit >= 2147483648.0)
         int32bit -= 4294967296.0;
     return static_cast<i32>(int32bit);
-}
-
-// 7.1.6 ToInt32 ( argument ), https://tc39.es/ecma262/#sec-toint32
-ThrowCompletionOr<i32> Value::to_i32(VM& vm) const
-{
-    if (is_int32())
-        return as_i32();
-    return to_i32_slow_case(vm);
-}
-
-// 7.1.7 ToUint32 ( argument ), https://tc39.es/ecma262/#sec-touint32
-ThrowCompletionOr<u32> Value::to_u32(VM& vm) const
-{
-    // OPTIMIZATION: If this value is encoded as a positive i32, return it directly.
-    if (is_int32() && as_i32() >= 0)
-        return as_i32();
-
-    // 1. Let number be ? ToNumber(argument).
-    double number = TRY(to_number(vm)).as_double();
-
-    // 2. If number is not finite or number is either +0𝔽 or -0𝔽, return +0𝔽.
-    if (!isfinite(number) || number == 0)
-        return 0;
-
-    // 3. Let int be the mathematical value whose sign is the sign of number and whose magnitude is floor(abs(ℝ(number))).
-    auto int_val = floor(fabs(number));
-    if (signbit(number))
-        int_val = -int_val;
-
-    // 4. Let int32bit be int modulo 2^32.
-    auto int32bit = modulo(int_val, NumericLimits<u32>::max() + 1.0);
-
-    // 5. Return 𝔽(int32bit).
-    // Cast to i64 here to ensure that the double --> u32 cast doesn't invoke undefined behavior
-    // Otherwise, negative numbers cause a UBSAN warning.
-    return static_cast<u32>(static_cast<i64>(int32bit));
+#endif
 }
 
 // 7.1.8 ToInt16 ( argument ), https://tc39.es/ecma262/#sec-toint16
@@ -1596,8 +1593,13 @@ ThrowCompletionOr<Value> left_shift(VM& vm, Value lhs, Value rhs)
         return Value(lhs_i32 << shift_count);
     }
     if (both_bigint(lhs_numeric, rhs_numeric)) {
+        // AD-HOC: Prevent allocating huge amounts of memory.
+        auto rhs_bigint = rhs_numeric.as_bigint().big_integer().unsigned_value();
+        if (rhs_bigint.byte_length() > sizeof(u32))
+            return vm.throw_completion<RangeError>(ErrorType::BigIntSizeExceeded);
+
         // 6.1.6.2.9 BigInt::leftShift ( x, y ), https://tc39.es/ecma262/#sec-numeric-types-bigint-leftShift
-        auto multiplier_divisor = Crypto::SignedBigInteger { Crypto::NumberTheory::Power(Crypto::UnsignedBigInteger(2), rhs_numeric.as_bigint().big_integer().unsigned_value()) };
+        auto multiplier_divisor = Crypto::SignedBigInteger { Crypto::NumberTheory::Power(Crypto::UnsignedBigInteger(2), rhs_bigint) };
 
         // 1. If y < 0ℤ, then
         if (rhs_numeric.as_bigint().big_integer().is_negative()) {
@@ -2226,7 +2228,7 @@ bool same_value_non_number(Value lhs, Value rhs)
     // 5. If x is a String, then
     if (lhs.is_string()) {
         // a. If x and y are exactly the same sequence of code units (same length and same code units at corresponding indices), return true; otherwise, return false.
-        return lhs.as_string().byte_string() == rhs.as_string().byte_string();
+        return lhs.as_string() == rhs.as_string();
     }
 
     // 3. If x is undefined, return true.
@@ -2307,7 +2309,7 @@ ThrowCompletionOr<bool> is_loosely_equal(VM& vm, Value lhs, Value rhs)
     // 7. If Type(x) is BigInt and Type(y) is String, then
     if (lhs.is_bigint() && rhs.is_string()) {
         // a. Let n be StringToBigInt(y).
-        auto bigint = string_to_bigint(vm, rhs.as_string().byte_string());
+        auto bigint = string_to_bigint(vm, rhs.as_string().utf8_string_view());
 
         // b. If n is undefined, return false.
         if (!bigint.has_value())
@@ -2388,8 +2390,8 @@ ThrowCompletionOr<TriState> is_less_than(VM& vm, Value lhs, Value rhs, bool left
 
     // 3. If px is a String and py is a String, then
     if (x_primitive.is_string() && y_primitive.is_string()) {
-        auto x_string = x_primitive.as_string().byte_string();
-        auto y_string = y_primitive.as_string().byte_string();
+        auto x_string = x_primitive.as_string().utf8_string_view();
+        auto y_string = y_primitive.as_string().utf8_string_view();
 
         Utf8View x_code_points { x_string };
         Utf8View y_code_points { y_string };
@@ -2424,7 +2426,7 @@ ThrowCompletionOr<TriState> is_less_than(VM& vm, Value lhs, Value rhs, bool left
     // a. If px is a BigInt and py is a String, then
     if (x_primitive.is_bigint() && y_primitive.is_string()) {
         // i. Let ny be StringToBigInt(py).
-        auto y_bigint = string_to_bigint(vm, y_primitive.as_string().byte_string());
+        auto y_bigint = string_to_bigint(vm, y_primitive.as_string().utf8_string_view());
 
         // ii. If ny is undefined, return undefined.
         if (!y_bigint.has_value())
@@ -2439,7 +2441,7 @@ ThrowCompletionOr<TriState> is_less_than(VM& vm, Value lhs, Value rhs, bool left
     // b. If px is a String and py is a BigInt, then
     if (x_primitive.is_string() && y_primitive.is_bigint()) {
         // i. Let nx be StringToBigInt(px).
-        auto x_bigint = string_to_bigint(vm, x_primitive.as_string().byte_string());
+        auto x_bigint = string_to_bigint(vm, x_primitive.as_string().utf8_string_view());
 
         // ii. If nx is undefined, return undefined.
         if (!x_bigint.has_value())
